@@ -68,12 +68,26 @@ class OCRExtractor:
     
     def extract_fields(self, file_path: str) -> ExtractionResult:
         """Full pipeline: text extraction -> classification -> field parsing."""
+        from pathlib import Path
+
         raw_text = self.extract_text(file_path)
-        doc_type, confidence = classify_document(raw_text)
-        
+        doc_type, base_confidence = classify_document(raw_text)
+
+        # Confidence modifiers
+        confidence = base_confidence
+        ext = Path(file_path).suffix.lower().lstrip(".")
+
+        # Reduce if file is image (OCR less reliable than native text)
+        if ext in ("png", "jpg", "jpeg", "tiff"):
+            confidence *= 0.85  # OCR penalty
+
+        # Reduce if PDF required OCR fallback (no native text extracted)
+        if ext == "pdf" and not raw_text.strip():
+            confidence *= 0.80  # Scanned PDF penalty
+
         errors = []
         extracted = {}
-        
+
         try:
             if doc_type == DocType.W2:
                 extracted = self._parse_w2(raw_text)
@@ -85,12 +99,19 @@ class OCRExtractor:
                 extracted = self._parse_tax_return(raw_text)
             else:
                 errors.append("Could not classify document type")
+                confidence *= 0.5
         except Exception as e:
             errors.append(f"Field extraction error: {str(e)}")
-        
+            confidence *= 0.6
+
+        # Penalize for missing critical fields
+        if doc_type == DocType.W2 and not extracted.get("wages_box_1"):
+            confidence *= 0.7
+            errors.append("Could not extract Box 1 wages")
+
         return ExtractionResult(
             document_type=doc_type,
-            confidence=confidence,
+            confidence=round(confidence, 3),
             raw_text=raw_text,
             extracted_fields=extracted,
             extraction_errors=errors

@@ -151,6 +151,15 @@ class LoanPipeline:
                     exc.memo_path = memo_path
                 db.commit()
 
+                # Email alert for exceptions
+                if settings.SMTP_HOST:
+                    self._send_alert_email(
+                        application_id,
+                        fields.get("borrower_name", "Unknown"),
+                        decision,
+                        violations
+                    )
+
             processing_time = time.time() - start_time
             loan.processing_time_seconds = processing_time
             loan.processed_at = datetime.utcnow()
@@ -171,5 +180,34 @@ class LoanPipeline:
             raise
         finally:
             db.close()
+
+    def _send_alert_email(self, app_id: str, borrower: str, decision: str, violations: List[Dict[str, Any]]):
+        """Send SMTP alert to underwriting team for flagged/rejected loans."""
+        import smtplib
+        from email.mime.text import MIMEText
+
+        subject = f"[PacketWise] {decision.upper()} — Loan {app_id} requires review"
+        body = f"""Borrower: {borrower}
+Application ID: {app_id}
+Decision: {decision.upper()}
+
+Violations:
+"""
+        for v in violations:
+            body += f"\n- [{v['severity'].upper()}] {v['rule_code']}: {v['description']}"
+
+        msg = MIMEText(body)
+        msg['Subject'] = subject
+        msg['From'] = settings.SMTP_USER
+        msg['To'] = settings.UNDERWRITING_EMAIL
+
+        try:
+            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+                server.starttls()
+                server.login(settings.SMTP_USER, settings.SMTP_PASS)
+                server.send_message(msg)
+            print(f"Email alert sent for {app_id}")
+        except Exception as e:
+            print(f"Email alert failed: {e}")
 
 from datetime import datetime

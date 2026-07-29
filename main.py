@@ -3,15 +3,17 @@ FastAPI main application entry point."""
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List, Optional
 import shutil
 from pathlib import Path
 import uuid
 
-from src.core_banking.models import init_db, get_db
+from src.core_banking.models import init_db, get_db, LoanApplication, LoanStatus, UnderwritingException
 from src.core_banking.api import router as core_router
 from src.pipeline.worker import LoanPipeline, PipelineResult
 from config.settings import settings
+from datetime import datetime
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -127,6 +129,60 @@ def dashboard_metrics(db: Session = Depends(get_db)):
                 "created_at": r.created_at.isoformat() if r.created_at else None
             }
             for r in recent
+        ]
+    }
+
+@app.get("/api/v1/report/performance", tags=["Reports"])
+def performance_report(db: Session = Depends(get_db)):
+    """Aggregated performance and quality report for processed loans."""
+    total = db.query(LoanApplication).count()
+    if total == 0:
+        return {"message": "No data available"}
+
+    # Decision distribution
+    approved = db.query(LoanApplication).filter(LoanApplication.status == LoanStatus.APPROVED).count()
+    flagged = db.query(LoanApplication).filter(LoanApplication.status == LoanStatus.FLAGGED).count()
+    rejected = db.query(LoanApplication).filter(LoanApplication.status == LoanStatus.REJECTED).count()
+
+    # Timing stats
+    times = [l.processing_time_seconds for l in db.query(LoanApplication).all() if l.processing_time_seconds]
+    avg_time = sum(times) / len(times) if times else 0
+    max_time = max(times) if times else 0
+    min_time = min(times) if times else 0
+
+    # Confidence stats
+    confs = [l.extraction_confidence_avg for l in db.query(LoanApplication).all() if l.extraction_confidence_avg]
+    avg_conf = sum(confs) / len(confs) if confs else 0
+
+    # Top 5 most frequent violations
+    top_violations = (
+        db.query(
+            UnderwritingException.rule_code,
+            func.count(UnderwritingException.id).label("count")
+        )
+        .group_by(UnderwritingException.rule_code)
+        .order_by(func.count(UnderwritingException.id).desc())
+        .limit(5)
+        .all()
+    )
+
+    return {
+        "generated_at": datetime.utcnow().isoformat(),
+        "total_applications": total,
+        "decisions": {
+            "approved": approved,
+            "flagged": flagged,
+            "rejected": rejected,
+            "approval_rate": round(approved / total, 3)
+        },
+        "performance": {
+            "avg_processing_time_sec": round(avg_time, 3),
+            "max_processing_time_sec": round(max_time, 3),
+            "min_processing_time_sec": round(min_time, 3),
+            "avg_extraction_confidence": round(avg_conf, 3)
+        },
+        "top_violations": [
+            {"rule_code": code, "count": count} for code, count in top_violations
         ]
     }
 
