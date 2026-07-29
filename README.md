@@ -7,7 +7,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green)](https://fastapi.tiangolo.com)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker)](https://docker.com)
-[![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache%202.0-D22128)](LICENSE)
 
 </div>
 
@@ -153,13 +153,8 @@ What you'll see:
 - **Exceptions:** Professional memo generated for flagged/rejected loans
 - **API Docs:** Interactive Swagger at `/docs`
 
-## Project Retrospective
+## Capabilities
 
-**Duration:** 9 sprints, ~6 hours  
-**Stack:** Python, FastAPI, SQLAlchemy, Tesseract OCR, React, Docker  
-**Role:** Full-stack engineer + PM (agile sprints)
-
-### What Was Built
 - Multi-document IDP pipeline classifying W-2s, Applications, Bank Statements, Tax Returns
 - OCR engine with Tesseract + OpenCV preprocessing (denoising, binarization)
 - Underwriting rule engine with configurable thresholds (YAML)
@@ -192,4 +187,13 @@ What you'll see:
 
 ## License
 
-MIT — Built for demonstration and educational purposes.
+Copyright 2026 Mpingo Systems LLC.
+
+Licensed under the Apache License, Version 2.0. You may not use this software
+except in compliance with the License. A copy is provided in [LICENSE](LICENSE),
+and is also available at http://www.apache.org/licenses/LICENSE-2.0.
+
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.

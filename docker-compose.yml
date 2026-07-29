@@ -5,4 +5,9 @@ services:
       - "8000:8000"
     environment:
       - DEBUG=true
+    # Supplies DATABASE_URL (and any other overrides) to the container.
+    # Without this the container never sees .env and silently falls back
+    # to the built-in SQLite default.
+    env_file:
+      - .env
     restart: unless-stopped

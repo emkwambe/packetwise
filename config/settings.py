@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
 
     # Database
+    # Local dev defaults to SQLite. Production sets DATABASE_URL in the
+    # environment (see .env.example) to a Supabase Postgres DSN. Use the
+    # psycopg2 driver — this application is synchronous (create_engine +
+    # sqlalchemy.orm.Session), so an asyncpg DSN raises
+    # "The asyncio extension requires an async driver to be used".
     DATABASE_URL: str = f"sqlite:///{BASE_DIR}/data/packetwise.db"
 
     # File Storage
