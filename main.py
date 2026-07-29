@@ -35,6 +35,17 @@ app.add_middleware(
 def startup():
     init_db()
 
+@app.get("/", tags=["System"])
+def root():
+    """Root endpoint with API entry points."""
+    return {
+        "service": settings.APP_NAME,
+        "version": "1.0.0",
+        "health": "/api/v1/health",
+        "docs": "/docs",
+        "api_prefix": settings.API_V1_PREFIX
+    }
+
 # Include routers
 app.include_router(core_router, prefix=settings.API_V1_PREFIX)
 
