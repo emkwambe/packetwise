@@ -210,39 +210,143 @@ class OCRExtractor:
         
         return data
     
+    # Recurring obligations that belong in a debt-to-income calculation.
+    # Housing is tracked separately because the loan application already
+    # states a monthly housing payment — counting both double-counts it.
+    _HOUSING_DEBT_RE = r"RENT\s+PAYMENT|MORTGAGE\s+PMT"
+    _NON_HOUSING_DEBT_RE = r"AUTO\s+LOAN(?:\s+PMT)?|STUDENT\s+LOAN(?:\s+PMT)?|CAR\s+PAYMENT|CREDIT\s+CARD"
+
     def _parse_bank_statement(self, text: str) -> Dict[str, Any]:
+        """Parse a bank statement, including the multi-month statements
+        produced by realitydb-docs.
+
+        Transaction rows in those PDFs extract as separate lines — the
+        description and its amount are never on the same line — so the debt
+        patterns below deliberately step over a newline rather than using
+        the same-line `[^\\n]*` form.
+        """
         data = {}
+        # Amounts are rendered as "$1,234.56"; strip the separators so a
+        # single numeric pattern works everywhere.
         text = text.replace(",", "").replace("$", "")
-        
-        patterns_end = [
-            r"(?:Ending\s*balance[,:]?\s*)([\d,]+\.?\d*)",
-            r"(?:Closing\s*balance[,:]?\s*)([\d,]+\.?\d*)",
+
+        # ── Balances and totals ──
+        # A statement may cover several months, so each label appears once
+        # per period: the opening balance is the FIRST occurrence, the
+        # closing balance the LAST, and the totals are summed.
+        begin_hits = self._extract_all_amounts(text, [
+            r"(?:Beginning|Starting|Opening)\s*Balance[:\s]+([\d,]+\.?\d*)",
+        ])
+        end_hits = self._extract_all_amounts(text, [
+            r"(?:Ending|Closing)\s*Balance[:\s]+([\d,]+\.?\d*)",
+        ])
+        deposit_hits = self._extract_all_amounts(text, [
+            r"Total\s*Deposits[:\s]+([\d,]+\.?\d*)",
+        ])
+        withdrawal_hits = self._extract_all_amounts(text, [
+            r"Total\s*Withdrawals[:\s]+([\d,]+\.?\d*)",
+        ])
+
+        data["beginning_balance"] = begin_hits[0] if begin_hits else None
+        data["ending_balance"] = end_hits[-1] if end_hits else None
+        data["total_deposits"] = round(sum(deposit_hits), 2) if deposit_hits else None
+        data["total_withdrawals"] = round(sum(withdrawal_hits), 2) if withdrawal_hits else None
+
+        # Number of statement periods, used to turn multi-month totals into
+        # monthly figures. Falls back to 1 so a single-month statement is
+        # never divided away.
+        months = max(len(begin_hits), 1)
+        data["statement_months"] = months
+
+        # ── Recurring obligations ──
+        housing_items = self._find_debits(text, self._HOUSING_DEBT_RE)
+        other_items = self._find_debits(text, self._NON_HOUSING_DEBT_RE)
+
+        monthly_housing = round(sum(i["amount"] for i in housing_items) / months, 2)
+        monthly_other = round(sum(i["amount"] for i in other_items) / months, 2)
+
+        data["monthly_housing_from_statement"] = monthly_housing
+        data["monthly_recurring_debts"] = round(monthly_housing + monthly_other, 2)
+
+        # `recurring_debits` feeds the DTI calculation in the rule engine,
+        # which already adds the application's housing payment — so housing
+        # is excluded here and the remainder is averaged to one month.
+        data["recurring_debits"] = [
+            {"name": name, "amount": round(total / months, 2)}
+            for name, total in self._group_debits(other_items).items()
         ]
-        data["ending_balance"] = self._extract_amount(text, patterns_end)
-        
-        patterns_begin = [
-            r"(?:Beginning\s*balance[,:]?\s*)([\d,]+\.?\d*)",
-            r"(?:Opening\s*balance[,:]?\s*)([\d,]+\.?\d*)",
-        ]
-        data["beginning_balance"] = self._extract_amount(text, patterns_begin)
-        
-        patterns_dep = [
-            r"(?:Total\s*deposits[,:]?\s*)([\d,]+\.?\d*)",
-        ]
-        data["total_deposits"] = self._extract_amount(text, patterns_dep)
-        
-        patterns_with = [
-            r"(?:Total\s*withdrawals[,:]?\s*)([\d,]+\.?\d*)",
-        ]
-        data["total_withdrawals"] = self._extract_amount(text, patterns_with)
-        
-        recurring = []
-        debit_lines = re.findall(r"(Auto\s*Loan|Student\s*Loan|Mortgage|Credit\s*Card).*?([\d,]+\.?\d*)", text, re.IGNORECASE)
-        for name, amount in debit_lines:
-            recurring.append({"name": name.strip(), "amount": float(amount.replace(",", ""))})
-        data["recurring_debits"] = recurring
-        
+
+        # ── Identity fields ──
+        holder = re.search(r"Account\s*Holder[:\s]+([^\n]+)", text, re.IGNORECASE)
+        if holder:
+            data["account_holder_name"] = holder.group(1).strip()
+
+        # A multi-month statement carries one period label per page; report
+        # the full span rather than only the first month.
+        periods = [m.group(1).strip() for m in
+                   re.finditer(r"Statement\s*period[:\s]+([^\n]+)", text, re.IGNORECASE)]
+        if periods:
+            data["statement_period"] = periods[0] if len(periods) == 1 else f"{periods[0]} to {periods[-1]}"
+
+        account = re.search(r"Account\s*Number[:\s]+(\*{0,4}\d{4})", text, re.IGNORECASE)
+        if account:
+            data["account_number"] = account.group(1).strip()
+
+        routing = re.search(r"Routing\s*Number[:\s]+(\d{9})", text, re.IGNORECASE)
+        if routing:
+            data["routing_number"] = routing.group(1).strip()
+
+        bank = self._extract_bank_name(text)
+        if bank:
+            data["bank_name"] = bank
+
         return data
+
+    def _find_debits(self, text: str, label_pattern: str) -> List[Dict[str, Any]]:
+        """Find debit rows whose amount may sit on the following line.
+
+        Matches `DESCRIPTION` then the first number after it, allowing the
+        trailing words of a description (e.g. "MORTGAGE PMT PENNYMAC") and a
+        line break to intervene.
+        """
+        pattern = rf"({label_pattern})[^\d\n]*[\s\n]*([\d,]+\.?\d*)"
+        items = []
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            try:
+                amount = float(match.group(2).replace(",", ""))
+            except ValueError:
+                continue
+            items.append({"name": match.group(1).strip().upper(), "amount": amount})
+        return items
+
+    def _group_debits(self, items: List[Dict[str, Any]]) -> Dict[str, float]:
+        grouped: Dict[str, float] = {}
+        for item in items:
+            grouped[item["name"]] = grouped.get(item["name"], 0.0) + item["amount"]
+        return grouped
+
+    def _extract_bank_name(self, text: str) -> Optional[str]:
+        """The bank name is the line immediately above 'ACCOUNT STATEMENT'."""
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        for i, line in enumerate(lines):
+            if line.upper().startswith("ACCOUNT STATEMENT") and i > 0:
+                candidate = lines[i - 1]
+                # Skip the diagonal watermark, which extracts before the header.
+                if "SYNTHETIC" in candidate.upper() and i > 1:
+                    candidate = lines[i - 2]
+                return candidate
+        return None
+
+    def _extract_all_amounts(self, text: str, patterns: List[str]) -> List[float]:
+        """Every match for the given patterns, in document order."""
+        found: List[float] = []
+        for pattern in patterns:
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                try:
+                    found.append(float(match.group(1).replace(",", "")))
+                except ValueError:
+                    continue
+        return found
     
     def _parse_tax_return(self, text: str) -> Dict[str, Any]:
         data = {}

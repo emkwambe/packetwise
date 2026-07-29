@@ -17,8 +17,13 @@ DOC_SIGNATURES = {
         "score_threshold": 2
     },
     DocType.BANK_STATEMENT: {
-        "required": ["statement", "account summary"],
-        "strong": ["beginning balance", "ending balance", "deposits", "withdrawals", "transactions"],
+        "required": ["account statement", "statement", "account summary"],
+        "strong": [
+            "beginning balance", "ending balance", "total deposits",
+            "total withdrawals", "routing number", "direct dep",
+            "member fdic", "member ncua", "deposits", "withdrawals",
+            "transactions", "statement period",
+        ],
         "score_threshold": 2
     },
     DocType.TAX_RETURN: {

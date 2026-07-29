@@ -4,6 +4,7 @@
 |--------|----------|---------|---------|---------|-------------|----------|-------|
 | S-011  | SQLite   | 0.414   | 2.113   | 0.045   | 145 pkt/min | 100%     | Docker local, text PDFs |
 | S-012  | Supabase | 0.754   | TBD     | TBD     | ~79 pkt/min | 100%     | Cloud DB, 5 packet sample |
+| S-013  | Supabase | 0.520   | 0.800   | 0.200   | ~115 pkt/min| 88.9%    | 3-doc packets (W-2 + bank stmt + app), 9 packet sample |
 
 ## Notes
 
@@ -13,6 +14,20 @@
 - Text PDFs: `extraction_confidence` = 1.0
 - Image PDFs (OCR): confidence ~0.85
 - Throughput calculated as `60 / avg_time`
+
+## Sprint 13 notes
+
+- S-013 packets carry **three** documents (W-2 PDF + 2-page bank statement PDF +
+  text application) versus two in S-012, yet averaged faster — 0.520s vs 0.754s.
+  The larger sample (9 vs 5) spreads first-packet warmup more thinly, which is
+  the likeliest explanation; per-document cost did not fall.
+- Averages are computed over the 9 packets of the run. The
+  `/report/performance` endpoint reported 0.603s at the same moment because it
+  averages every row in the database, including Sprint 12's.
+- Accuracy is measured against the *scenario* each packet was built for, not
+  against extraction correctness. Extraction confidence was 1.0 on all 9. The
+  single miss (flagged → rejected, DTI 51.7%) is ISSUE-005, a fixture-margin
+  problem rather than a pipeline error.
 
 ## Caveats
 

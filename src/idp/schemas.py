@@ -49,13 +49,21 @@ class ApplicationData(BaseModel):
 
 class BankStatementData(BaseModel):
     bank_name: Optional[str] = None
+    account_holder_name: Optional[str] = None
     account_number: Optional[str] = None
+    routing_number: Optional[str] = None
     statement_period: Optional[str] = None
+    statement_months: Optional[int] = None   # periods covered by the document
     beginning_balance: Optional[float] = None
     ending_balance: Optional[float] = None
     total_deposits: Optional[float] = None
     total_withdrawals: Optional[float] = None
-    recurring_debits: List[dict] = []  # [{"name": "Auto Loan", "amount": 450.00}]
+    # Monthly averages. `monthly_recurring_debts` includes housing;
+    # `recurring_debits` excludes it, because the loan application already
+    # supplies a monthly housing payment and the rule engine adds both.
+    monthly_recurring_debts: Optional[float] = None
+    monthly_housing_from_statement: Optional[float] = None
+    recurring_debits: List[dict] = []  # [{"name": "AUTO LOAN PMT", "amount": 450.00}]
 
 class TaxReturnData(BaseModel):
     taxpayer_name: Optional[str] = None
