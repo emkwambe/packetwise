@@ -1,20 +1,8 @@
-version: "3.8"
-
 services:
   packetwise:
     build: .
     ports:
       - "8000:8000"
-    volumes:
-      - ./data:/app/data
-      - ./config:/app/config
     environment:
       - DEBUG=true
-      - DATABASE_URL=sqlite:///app/data/packetwise.db
     restart: unless-stopped
-
-  # Optional: Redis for future Celery queue
-  # redis:
-  #   image: redis:7-alpine
-  #   ports:
-  #     - "6379:6379"

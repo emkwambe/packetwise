@@ -1,0 +1,9 @@
+Uniform Residential Loan Application
+Borrower Name: Jane Smith
+SSN: 111-22-3333
+Loan Amount: 400000
+Property Value: 500000
+Purchase Price: 500000
+Gross Monthly Income: 7083.33
+Credit Score: 720
+Monthly Housing Payment: 2500
