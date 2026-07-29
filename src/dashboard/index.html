@@ -68,7 +68,9 @@
 
             const fetchDashboard = useCallback(async () => {
                 try {
-                    const res = await fetch(`${API_BASE}/metrics/dashboard`);
+                    const res = await fetch(`${API_BASE}/metrics/dashboard`, {
+                        headers: { 'X-API-Key': 'pw_live_packetwise_2026' }
+                    });
                     const data = await res.json();
                     setMetrics(data);
                 } catch (e) { console.error(e); }
@@ -76,7 +78,9 @@
 
             const fetchLoans = useCallback(async () => {
                 try {
-                    const res = await fetch(`${API_BASE}/core-banking/loans`);
+                    const res = await fetch(`${API_BASE}/core-banking/loans`, {
+                        headers: { 'X-API-Key': 'pw_live_packetwise_2026' }
+                    });
                     const data = await res.json();
                     setLoans(data);
                 } catch (e) { console.error(e); }
@@ -84,7 +88,9 @@
 
             const fetchExceptions = useCallback(async () => {
                 try {
-                    const res = await fetch(`${API_BASE}/core-banking/exceptions`);
+                    const res = await fetch(`${API_BASE}/core-banking/exceptions`, {
+                        headers: { 'X-API-Key': 'pw_live_packetwise_2026' }
+                    });
                     const data = await res.json();
                     setExceptions(data);
                 } catch (e) { console.error(e); }
@@ -111,7 +117,13 @@
                 for (const f of files) formData.append("files", f);
 
                 try {
-                    const res = await fetch(`${API_BASE}/process`, { method: "POST", body: formData });
+                    // No Content-Type header — the browser sets it with the
+                    // correct multipart boundary for FormData.
+                    const res = await fetch(`${API_BASE}/process`, {
+                        method: "POST",
+                        headers: { 'X-API-Key': 'pw_live_packetwise_2026' },
+                        body: formData
+                    });
                     const data = await res.json();
                     if (!res.ok) throw new Error(data.detail || "Processing failed");
                     setUploadResult(data);
