@@ -43,6 +43,11 @@ SCENARIOS = [
     "gross_monthly_income": 8500,
     "credit_score": 740,
     "monthly_housing_payment": 1900,
+    # Loan-bearing debts as a share of monthly income. Fixing this makes
+    # each packet's DTI predictable instead of seed-dependent (ISSUE-005):
+    # DTI = (housing + share * income) / income.
+    #   approved: (1900 + 0.05*8500)/8500 = 27.4%  -> clean
+    "debt_to_income_target": 0.05,
   },
   {
     "name": "flagged",
@@ -52,6 +57,9 @@ SCENARIOS = [
     "gross_monthly_income": 6200,
     "credit_score": 685,
     "monthly_housing_payment": 2400,
+    #   flagged: (2400 + 0.07*6200)/6200 = 45.7% -> over 43% QM, under the
+    #   50% critical ceiling, so it stays flagged across the W-2 +/-3% band
+    "debt_to_income_target": 0.07,
   },
   {
     "name": "rejected",
@@ -61,6 +69,8 @@ SCENARIOS = [
     "gross_monthly_income": 4800,
     "credit_score": 590,
     "monthly_housing_payment": 3100,
+    #   rejected: credit score 590 is critical on its own
+    "debt_to_income_target": 0.10,
   },
 ]
 
@@ -136,6 +146,7 @@ def run(count: int = 10):
           output_dir=os.path.join(tmpdir, f"bank_{scenario['name']}"),
           seed_start=100 + s_idx * 50,
           annual_incomes=[annual_income],
+          debt_to_income_target=scenario["debt_to_income_target"],
         )
     except Exception as e:
       print(f"  ERROR generating bank statements: {e}")

@@ -1,8 +1,9 @@
 """PacketWise - Commercial Loan Application & Income Verification System.
 FastAPI main application entry point."""
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -15,6 +16,10 @@ import time
 from src.core_banking.models import init_db, get_db, LoanApplication, LoanStatus, UnderwritingException
 from src.core_banking.api import router as core_router
 from src.pipeline.worker import LoanPipeline, PipelineResult
+from src.auth.session import (
+    SESSION_COOKIE, INSECURE_DEFAULTS,
+    create_session_token, verify_session_token, check_password,
+)
 from config.settings import settings
 from datetime import datetime
 
@@ -25,9 +30,12 @@ app = FastAPI(
 )
 
 # CORS
+# An explicit allowlist, not "*": the dashboard now authenticates with a
+# cookie, and a wildcard origin combined with credentials would let any site
+# make authenticated calls on a logged-in user's behalf.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -35,24 +43,35 @@ app.add_middleware(
 
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
-    # Skip auth for health and root
+    # Skip auth for health, root and the auth endpoints themselves
     skip_paths = [
         "/api/v1/health",
         "/",
         "/docs",
         "/openapi.json",
-        "/redoc"
+        "/redoc",
+        "/api/v1/auth/login",
+        "/api/v1/auth/logout",
+        "/api/v1/auth/status",
     ]
     if request.url.path in skip_paths:
         return await call_next(request)
 
+    # Two accepted credentials, in order of cost:
+    #   1. X-API-Key   — server-to-server callers (integration script, jobs)
+    #   2. pw_session  — a browser that logged in with the dashboard password
     key = request.headers.get("X-API-Key")
-    if not key or key != settings.API_KEY:
-        return JSONResponse(
-            status_code=401,
-            content={"detail": "Invalid or missing API key"}
-        )
-    return await call_next(request)
+    if key and check_password(key, settings.API_KEY):
+        return await call_next(request)
+
+    if verify_session_token(request.cookies.get(SESSION_COOKIE),
+                            settings.SESSION_SECRET):
+        return await call_next(request)
+
+    return JSONResponse(
+        status_code=401,
+        content={"detail": "Invalid or missing API key"}
+    )
 
 # Request logging middleware
 @app.middleware("http")
@@ -67,6 +86,60 @@ async def log_requests(request: Request, call_next):
 @app.on_event("startup")
 def startup():
     init_db()
+    # Shipping the built-in credentials outside development would leave the
+    # deployment open to anyone who has read the source.
+    if not settings.DEBUG:
+        insecure = [
+            name for name, value in (
+                ("API_KEY", settings.API_KEY),
+                ("DASHBOARD_PASSWORD", settings.DASHBOARD_PASSWORD),
+                ("SESSION_SECRET", settings.SESSION_SECRET),
+            ) if value in INSECURE_DEFAULTS
+        ]
+        if insecure:
+            print(f"WARNING: default credentials still in use with DEBUG off: "
+                  f"{', '.join(insecure)}. Set them in .env before deploying.")
+
+
+# ─── Authentication ──────────────────────────────────────
+class LoginRequest(BaseModel):
+    password: str
+
+
+@app.post("/api/v1/auth/login", tags=["Auth"])
+def login(payload: LoginRequest, response: Response):
+    """Exchange the dashboard password for an HttpOnly session cookie."""
+    if not check_password(payload.password, settings.DASHBOARD_PASSWORD):
+        return JSONResponse(status_code=401,
+                            content={"detail": "Invalid password"})
+
+    token = create_session_token(settings.SESSION_SECRET,
+                                 settings.SESSION_TTL_HOURS)
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=token,
+        httponly=True,          # not readable from JavaScript
+        samesite="lax",         # not sent on cross-site POSTs
+        secure=not settings.DEBUG,   # HTTPS-only outside local development
+        max_age=settings.SESSION_TTL_HOURS * 3600,
+        path="/",
+    )
+    return {"authenticated": True,
+            "expires_in_hours": settings.SESSION_TTL_HOURS}
+
+
+@app.post("/api/v1/auth/logout", tags=["Auth"])
+def logout(response: Response):
+    """Clear the session cookie on this browser."""
+    response.delete_cookie(key=SESSION_COOKIE, path="/")
+    return {"authenticated": False}
+
+
+@app.get("/api/v1/auth/status", tags=["Auth"])
+def auth_status(request: Request):
+    """Whether the caller currently holds a valid session."""
+    return {"authenticated": verify_session_token(
+        request.cookies.get(SESSION_COOKIE), settings.SESSION_SECRET)}
 
 @app.get("/", response_class=HTMLResponse)
 def serve_dashboard():

@@ -8,6 +8,7 @@
 
 - **Severity:** Medium
 - **Found:** Sprint 12
+- **Status:** **Fixed in Sprint 14**
 - **Fix sprint:** 14
 
 **Description**
@@ -25,6 +26,18 @@ publicly.
 
 Sprint 14 — add a login page with a session cookie. API key reserved for
 server-to-server calls only.
+
+**Resolution (Sprint 14)**
+
+Implemented as planned. The dashboard now contains **zero** occurrences of the
+API key; it logs in with `DASHBOARD_PASSWORD` and holds an HttpOnly,
+`SameSite=Lax` session cookie it cannot read. CORS moved off the `*` wildcard to
+an explicit allowlist. See [ADR-004](../adr/ADR-004-session-auth-for-dashboard.md).
+
+Two limitations remain and are **not** closed by this fix: the password is
+shared rather than per-user (so there is still no audit trail), and logout is
+client-side only because tokens are stateless — an issued token cannot be
+revoked before it expires. Tracked as ISSUE-007.
 
 ---
 
@@ -70,20 +83,34 @@ in the database are Sprint 12 rows), and approved packets went from 0 to 3.
 
 - **Severity:** Low
 - **Found:** Sprint 12
-- **Fix sprint:** 14
+- **Status:** **Partially verified in Sprint 14** — still open
+- **Fix sprint:** 15
 
 **Description**
 
 Dark mode CSS was added in the Sprint 12 dashboard redesign but not verified in
 a real browser (headless Chrome cannot set `prefers-color-scheme`).
 
-**Workaround**
+**Progress (Sprint 14)**
 
-None needed for production.
+Verified by rendering a copy of the page with `data-theme="dark"` stamped on the
+root element. The dark plane, dark card surface and light ink all resolve
+correctly, so the custom-property overrides work.
+
+Two gaps keep this open:
+
+- Only the **login screen** was rendered this way. The signed-in dashboard —
+  stat tiles, tables, badges, upload zone — has still never been seen in dark
+  mode.
+- Only the **`data-theme` path** was exercised. The
+  `@media (prefers-color-scheme: dark)` block remains untested, and it is the
+  one that fires for most real users.
 
 **Fix plan**
 
-Manual browser test in Sprint 14.
+Sprint 15 — drive a signed-in session through Chrome DevTools Protocol
+(`Emulation.setEmulatedMedia`) to exercise the media query, and screenshot all
+four tabs.
 
 ---
 
@@ -126,6 +153,7 @@ and no code was changed for this issue.
 
 - **Severity:** Medium
 - **Found:** Sprint 13
+- **Status:** **Fixed in Sprint 14**
 - **Fix sprint:** 14
 
 **Description**
@@ -153,6 +181,52 @@ Sprint 14 — give the bank statement generator an income-proportional debt
 profile (e.g. a `debt_to_income_target` parameter) so recurring debts scale with
 `annual_income` instead of being drawn independently. Widening the gap between
 the flagged scenario's base DTI and the 50% ceiling would also work.
+
+**Resolution (Sprint 14)**
+
+`generate_synthetic_bank_statement()` gained `debt_to_income_target`. When set,
+the loan-bearing debts (auto + student, split 60/40) are sized to that share of
+monthly income instead of drawn at random; other recurring items stay random
+because they do not affect DTI. Each scenario now declares its own target
+(approved 0.05, flagged 0.07, rejected 0.10).
+
+Verified over 30 packets: flagged DTI landed at **44.5–46.6%** on all ten —
+inside the 43–50% band with margin on both sides — and the run produced a clean
+**10/10/10** with zero errors.
+
+---
+
+## ISSUE-007: Session auth is shared-password with no revocation
+
+- **Severity:** Medium
+- **Found:** Sprint 14
+- **Fix sprint:** 15
+
+**Description**
+
+The Sprint 14 session auth (ADR-004) closes the credential-in-page-source hole,
+but two properties of the design are worth tracking explicitly:
+
+1. **One shared password for all operators.** Access is gated, but no action can
+   be attributed to a person — the audit-trail gap first noted in ADR-002 is
+   still open.
+2. **Logout does not revoke.** Tokens are stateless HMAC signatures, so
+   `POST /auth/logout` clears the cookie in that browser while the token itself
+   stays valid until expiry (default 12h). A leaked token cannot be cancelled
+   short of rotating `SESSION_SECRET`, which signs every operator out.
+
+There is also no rate limiting or lockout on `/auth/login`, so the password can
+be attacked at network speed.
+
+**Workaround**
+
+Keep `SESSION_TTL_HOURS` short. Use a high-entropy `DASHBOARD_PASSWORD`. Keep
+the deployment off the public internet until this is addressed.
+
+**Fix plan**
+
+Sprint 15 — per-user accounts with hashed passwords and a server-side session
+store (revocable), plus rate limiting on the login endpoint.
 
 ---
 

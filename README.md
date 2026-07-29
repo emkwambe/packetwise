@@ -111,7 +111,7 @@ pytest tests/integration/test_pipeline.py -v
 - **OCR/IDP:** Tesseract, PyMuPDF, OpenCV
 - **Rules:** YAML-configurable engine
 - **Database:** SQLite (dev) → PostgreSQL (prod path)
-- **PDF Memos:** Jinja2 + WeasyPrint (with HTML fallback)
+- **PDF Memos:** ReportLab (platypus) — no native dependencies
 - **Frontend:** React 18 via CDN (no build)
 - **Container:** Docker + docker-compose
 
@@ -176,7 +176,7 @@ What you'll see:
 1. **Python-native over UiPath:** Cross-platform, zero licensing, better for East Africa deployment
 2. **SQLite for development, PostgreSQL for production:** zero-config locally, managed Postgres under load
 3. **Keyword classification before ML:** no training data required, extensible to LayoutLM
-4. **HTML memo fallback over PDF-only:** WeasyPrint requires GTK; HTML works everywhere
+4. **ReportLab over WeasyPrint for memos:** WeasyPrint needs native GTK libraries that are absent on Windows, so every memo silently degraded to HTML. ReportLab is pure Python and always produces a real PDF (ADR-003)
 
 ## Roadmap
 - [ ] Windows Tesseract install for local OCR (works in Docker)

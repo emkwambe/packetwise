@@ -37,7 +37,7 @@
 | Document Classification | Heuristic keyword matching | Fast, no model training needed for MVP |
 | Rule Engine | Custom Python + YAML config | Flexible, auditable, no vendor lock-in |
 | Database | SQLite (dev) | Zero-config, file-based, portable |
-| PDF Generation | WeasyPrint + Jinja2 | HTML-to-PDF, professional output |
+| PDF Generation | ReportLab (platypus) | Pure Python, no native deps (ADR-003) |
 | Frontend | React 18 (CDN) | No build step, instant deployment |
 | Container | Docker + docker-compose | One-command setup, shareable |
 

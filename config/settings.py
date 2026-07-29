@@ -39,7 +39,16 @@ class Settings(BaseSettings):
     ALLOWED_EXTENSIONS: set = {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".txt"}
 
     # Auth
+    # API_KEY authenticates server-to-server callers (the integration script,
+    # other services). Browser sessions use DASHBOARD_PASSWORD + a signed
+    # cookie instead — see src/auth/session.py and ADR-004.
     API_KEY: str = "dev-key-change-in-production"
+    DASHBOARD_PASSWORD: str = "dev-password-change-in-production"
+    SESSION_SECRET: str = "dev-secret-change-in-production"
+    SESSION_TTL_HOURS: int = 12
+    # Origins allowed to call the API with credentials. "*" cannot be used
+    # together with cookies, so this is an explicit allowlist.
+    CORS_ORIGINS: str = "http://localhost:8000,http://127.0.0.1:8000"
 
     # Alerting
     SMTP_HOST: str = ""
