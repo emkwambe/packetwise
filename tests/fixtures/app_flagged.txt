@@ -1,0 +1,9 @@
+Uniform Residential Loan Application
+Borrower Name: Flagged Borrower
+SSN: 222-22-2222
+Loan Amount: 400000
+Property Value: 500000
+Purchase Price: 500000
+Gross Monthly Income: 6500
+Credit Score: 680
+Monthly Housing Payment: 2200
