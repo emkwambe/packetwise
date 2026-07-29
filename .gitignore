@@ -29,3 +29,7 @@ Thumbs.db
 
 # Env
 .env
+
+data/bench_sqlite.db
+data/*.db.bak
+
