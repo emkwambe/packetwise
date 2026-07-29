@@ -1,13 +1,16 @@
 """PacketWise - Commercial Loan Application & Income Verification System.
 FastAPI main application entry point."""
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional
 import shutil
 from pathlib import Path
 import uuid
+import time
 
 from src.core_banking.models import init_db, get_db, LoanApplication, LoanStatus, UnderwritingException
 from src.core_banking.api import router as core_router
@@ -30,21 +33,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    duration = time.time() - start
+    print(f"[{request.method}] {request.url.path} | {response.status_code} | {duration:.3f}s")
+    return response
+
 # Initialize DB on startup
 @app.on_event("startup")
 def startup():
     init_db()
 
-@app.get("/", tags=["System"])
-def root():
-    """Root endpoint with API entry points."""
-    return {
-        "service": settings.APP_NAME,
-        "version": "1.0.0",
-        "health": "/api/v1/health",
-        "docs": "/docs",
-        "api_prefix": settings.API_V1_PREFIX
-    }
+@app.get("/", response_class=HTMLResponse)
+def serve_dashboard():
+    """Serve the React dashboard at the root URL."""
+    dashboard_path = Path(__file__).parent / "src" / "dashboard" / "index.html"
+    return dashboard_path.read_text(encoding="utf-8")
 
 # Include routers
 app.include_router(core_router, prefix=settings.API_V1_PREFIX)
