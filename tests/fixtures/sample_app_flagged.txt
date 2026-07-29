@@ -6,4 +6,4 @@ Property Value: 500000
 Purchase Price: 500000
 Gross Monthly Income: 6250
 Credit Score: 680
-Monthly Housing Payment: 2200
+Monthly Housing Payment: 3300

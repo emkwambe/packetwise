@@ -4,8 +4,8 @@
 
 **Automated Commercial Loan Intake with Intelligent Document Processing**
 
-[![Python](https://img.shields.io/badge/Python-3.11-blue)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.111-green)](https://fastapi.tiangolo.com)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green)](https://fastapi.tiangolo.com)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker)](https://docker.com)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
@@ -13,67 +13,88 @@
 
 ---
 
-An automated loan intake solution using Intelligent Document Processing (IDP), OCR, and underwriting rule engines. Built 100% open-source, containerized, and demo-ready.
+## What It Does
 
-## Features
+PacketWise automates the commercial loan underwriting pipeline:
 
-- **Multi-Document IDP**: Classifies and extracts data from W-2s, Bank Statements, Tax Returns, and Loan Applications
-- **OCR Engine**: Tesseract + PyMuPDF with preprocessing (denoising, binarization)
-- **Underwriting Rules**: DTI, LTV, Income Verification, Credit Score thresholds
-- **Exception Memos**: Auto-generated professional PDF memos for flagged/rejected files
-- **Mock Core Banking**: SQLite-based ledger with FastAPI REST API
-- **Dashboard**: Real-time React monitoring dashboard
-- **Dockerized**: One-command deployment
+| Stage | What Happens |
+|-------|-------------|
+| **Ingest** | Upload mixed document packets (W-2, Application, Bank Statement, Tax Return) |
+| **Classify** | Document type detection via keyword classifier (extensible to ML models) |
+| **Extract** | OCR + regex field extraction (Tesseract, PyMuPDF, OpenCV) |
+| **Validate** | Cross-document consistency checks (stated vs. verified income) |
+| **Decide** | Underwriting rule engine (DTI, LTV, credit score thresholds) |
+| **Alert** | Auto-generated exception memos (PDF) + optional SMTP email alerts |
+| **Monitor** | Real-time dashboard + performance report endpoint |
+
+## Architecture
+
+```
+┌─────────────┐    ┌──────────────┐    ┌─────────────┐    ┌──────────────┐
+│   Upload    │───▶│   Classify   │───▶│   Extract   │───▶│   Validate   │
+│  (Drag/Drop)│    │  (Doc Type)  │    │  (OCR/AI)   │    │  (Rules)     │
+└─────────────┘    └──────────────┘    └─────────────┘    └──────┬───────┘
+                                                                  │
+                       ┌──────────────────────────────────────────┘
+                       ▼
+              ┌─────────────┐    ┌──────────────┐    ┌──────────────┐
+              │   DECISION  │◀───│   METRICS    │◀───│   ENGINE     │
+              │   (API)     │    │  (DTI/LTV)   │    │  (Underwrite)│
+              └──────┬──────┘    └──────────────┘    └──────────────┘
+                     │
+        ┌────────────┼────────────┐
+        ▼            ▼            ▼
+   ┌─────────┐  ┌─────────┐  ┌──────────┐
+   │APPROVED │  │ FLAGGED │  │ REJECTED │
+   │  to DB  │  │  Memo   │  │  Memo    │
+   │         │  │  + Alert│  │  + Alert │
+   └─────────┘  └─────────┘  └──────────┘
+```
 
 ## Quick Start
 
 ```bash
-# Clone and enter
+# Clone
+git clone <your-repo>
 cd packetwise
 
-# Option 1: Docker (recommended)
+# Docker (recommended)
 docker-compose up --build
 
-# Option 2: Local Python
+# Or local
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-python main.py
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-## API Endpoints
+## API Reference
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/v1/process` | POST | Upload loan packet, get decision |
-| `/api/v1/core-banking/loans` | GET | List all loan applications |
-| `/api/v1/core-banking/loans/{id}` | GET | Get specific loan |
-| `/api/v1/core-banking/exceptions` | GET | List underwriting exceptions |
-| `/api/v1/metrics/dashboard` | GET | Dashboard metrics |
+| `/api/v1/core-banking/loans` | GET | List all applications |
+| `/api/v1/core-banking/exceptions` | GET | Underwriting exceptions |
+| `/api/v1/metrics/dashboard` | GET | Real-time dashboard data |
+| `/api/v1/report/performance` | GET | Performance benchmark report |
 | `/api/v1/health` | GET | Health check |
 
-## Dashboard
+## Test Results
 
-Open `src/dashboard/index.html` in a browser (or serve via any static server) while the API runs on `localhost:8000`.
+| Scenario | Decision | Avg Time | Confidence |
+|----------|----------|----------|------------|
+| Clean file (text) | Approved | ~0.15s | 1.00 |
+| High DTI | Flagged | ~1.1s | 1.00 |
+| Critical violations | Rejected | ~1.4s | 1.00 |
+| Image OCR (W-2) | Approved | ~2.0s | 0.95 |
 
-## Project Structure
+Run the integration suite:
 
-```
-packetwise/
-├── src/
-│   ├── idp/              # Document classification & OCR extraction
-│   ├── engine/           # Underwriting rule engine
-│   ├── core_banking/     # Mock core banking API & models
-│   ├── exceptions/       # Exception memo generator
-│   ├── pipeline/         # End-to-end processing orchestrator
-│   └── dashboard/        # React monitoring dashboard
-├── config/               # Settings & business rules
-├── data/                 # Uploads, processed files, DB
-├── docs/                 # PDD, SDD, test plans
-└── tests/                # Unit & integration tests
+```bash
+pytest tests/integration/test_pipeline.py -v
 ```
 
-## Underwriting Rules (config/rules.yaml)
+## Underwriting Rules
 
 | Rule | Threshold | Severity |
 |------|-----------|----------|
@@ -82,10 +103,34 @@ packetwise/
 | Min Credit Score | ≥ 620 | Critical |
 | Max LTV | ≤ 80% | Warning |
 | Income Variance | ≤ 10% | Warning |
+| Missing Required Doc | W-2 / tax / bank | Critical |
 
-## Synthetic Data
+## Tech Stack
 
-Request synthetic W-2, Application, and Bank Statement datasets from RealityDB using the specs in `docs/Synthetic_Data_Specs.md`.
+- **Backend:** Python 3.11, FastAPI, SQLAlchemy
+- **OCR/IDP:** Tesseract, PyMuPDF, OpenCV
+- **Rules:** YAML-configurable engine
+- **Database:** SQLite (dev) → PostgreSQL (prod path)
+- **PDF Memos:** Jinja2 + WeasyPrint (with HTML fallback)
+- **Frontend:** React 18 via CDN (no build)
+- **Container:** Docker + docker-compose
+
+## Project Structure
+
+```
+packetwise/
+├── src/
+│   ├── idp/           # Document classification & OCR
+│   ├── engine/        # Underwriting rule engine
+│   ├── core_banking/  # Mock core banking API
+│   ├── exceptions/    # Exception memo generator
+│   ├── pipeline/      # End-to-end orchestrator
+│   └── dashboard/     # React monitoring UI
+├── config/            # Settings & business rules
+├── tests/             # Unit & integration tests
+├── docs/              # PDD, SDD
+└── data/              # Uploads, DB, memos
+```
 
 ## License
 
