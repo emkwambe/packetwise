@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE_MB: int = 25
     ALLOWED_EXTENSIONS: set = {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".txt"}
 
+    # Auth
+    API_KEY: str = "dev-key-change-in-production"
+
     # Alerting
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587

@@ -2,7 +2,7 @@
 FastAPI main application entry point."""
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -32,6 +32,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    # Skip auth for health and root
+    skip_paths = [
+        "/api/v1/health",
+        "/",
+        "/docs",
+        "/openapi.json",
+        "/redoc"
+    ]
+    if request.url.path in skip_paths:
+        return await call_next(request)
+
+    key = request.headers.get("X-API-Key")
+    if not key or key != settings.API_KEY:
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Invalid or missing API key"}
+        )
+    return await call_next(request)
 
 # Request logging middleware
 @app.middleware("http")
