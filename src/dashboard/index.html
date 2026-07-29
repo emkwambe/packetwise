@@ -9,45 +9,210 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
+        /* Palette, surfaces and status steps are the validated reference
+           instance from the data-viz design method. Status hues are fixed
+           (never themed) and always ship with a dot + text label, never
+           colour alone — warning/serious sit below 3:1 on the light surface
+           by design, and the label is the mitigation. */
+        :root {
+            color-scheme: light;
+            --plane: #f9f9f7;
+            --surface: #fcfcfb;
+            --ink: #0b0b0b;
+            --ink-2: #52514e;
+            --muted: #898781;
+            --hairline: rgba(11, 11, 11, 0.10);
+            --grid: #e1e0d9;
+            --accent: #2a78d6;
+            --good: #0ca30c;
+            --warning: #fab219;
+            --serious: #ec835a;
+            --critical: #d03b3b;
+            --good-ink: #006300;
+            --wash: rgba(11, 11, 11, 0.035);
+        }
+        @media (prefers-color-scheme: dark) {
+            :root:not([data-theme="light"]) {
+                color-scheme: dark;
+                --plane: #0d0d0d;
+                --surface: #1a1a19;
+                --ink: #ffffff;
+                --ink-2: #c3c2b7;
+                --muted: #898781;
+                --hairline: rgba(255, 255, 255, 0.10);
+                --grid: #2c2c2a;
+                --accent: #3987e5;
+                --good-ink: #0ca30c;
+                --wash: rgba(255, 255, 255, 0.04);
+            }
+        }
+        :root[data-theme="dark"] {
+            color-scheme: dark;
+            --plane: #0d0d0d;
+            --surface: #1a1a19;
+            --ink: #ffffff;
+            --ink-2: #c3c2b7;
+            --muted: #898781;
+            --hairline: rgba(255, 255, 255, 0.10);
+            --grid: #2c2c2a;
+            --accent: #3987e5;
+            --good-ink: #0ca30c;
+            --wash: rgba(255, 255, 255, 0.04);
+        }
+
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f1f5f9; color: #1e293b; }
-        .app { max-width: 1400px; margin: 0 auto; padding: 24px; }
-        .header { background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); color: white; padding: 32px; border-radius: 12px; margin-bottom: 24px; }
-        .header h1 { font-size: 28px; margin-bottom: 8px; }
-        .header p { opacity: 0.8; }
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
-        .stat-card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-left: 4px solid #3b82f6; }
-        .stat-card.approved { border-left-color: #22c55e; }
-        .stat-card.flagged { border-left-color: #f59e0b; }
-        .stat-card.rejected { border-left-color: #ef4444; }
-        .stat-card.exceptions { border-left-color: #8b5cf6; }
-        .stat-value { font-size: 32px; font-weight: 700; color: #1e293b; }
-        .stat-label { font-size: 13px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
-        .section { background: white; border-radius: 10px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-        .section h2 { font-size: 18px; margin-bottom: 16px; color: #1e3a5f; }
-        table { width: 100%; border-collapse: collapse; font-size: 14px; }
-        th { text-align: left; padding: 12px; background: #f8fafc; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0; }
-        td { padding: 12px; border-bottom: 1px solid #e2e8f0; }
-        .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
-        .badge-approved { background: #dcfce7; color: #166534; }
-        .badge-flagged { background: #fef3c7; color: #92400e; }
-        .badge-rejected { background: #fee2e2; color: #991b1b; }
-        .badge-pending { background: #e0e7ff; color: #3730a3; }
-        .upload-zone { border: 2px dashed #cbd5e1; border-radius: 10px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.2s; }
-        .upload-zone:hover { border-color: #3b82f6; background: #f8fafc; }
-        .upload-zone.dragover { border-color: #3b82f6; background: #eff6ff; }
-        .btn { background: #1e3a5f; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; }
-        .btn:hover { background: #0f172a; }
-        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .result-box { background: #f8fafc; border-radius: 8px; padding: 16px; margin-top: 16px; }
-        .result-box pre { font-size: 12px; overflow-x: auto; }
-        .error { color: #ef4444; background: #fef2f2; padding: 12px; border-radius: 6px; margin-top: 12px; }
-        .success { color: #166534; background: #dcfce7; padding: 12px; border-radius: 6px; margin-top: 12px; }
-        .tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 2px solid #e2e8f0; }
-        .tab { padding: 10px 20px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; font-weight: 500; }
-        .tab.active { border-bottom-color: #1e3a5f; color: #1e3a5f; }
-        .progress-bar { width: 100%; height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden; margin-top: 8px; }
-        .progress-fill { height: 100%; background: #3b82f6; transition: width 0.3s; }
+        body {
+            font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+            background: var(--plane);
+            color: var(--ink);
+            -webkit-font-smoothing: antialiased;
+        }
+        .app { max-width: 1200px; margin: 0 auto; padding: 40px 24px 64px; }
+
+        /* ─── Header ─────────────────────────────────────── */
+        .header {
+            display: flex; align-items: baseline; justify-content: space-between;
+            gap: 16px; flex-wrap: wrap;
+            padding-bottom: 20px; margin-bottom: 28px;
+            border-bottom: 1px solid var(--hairline);
+        }
+        .header h1 {
+            font-size: 20px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink);
+        }
+        .header p { font-size: 13px; color: var(--muted); margin-top: 4px; }
+        .live {
+            display: inline-flex; align-items: center; gap: 7px;
+            font-size: 12px; color: var(--ink-2);
+        }
+        .live .dot { background: var(--good); }
+
+        /* ─── Tabs ───────────────────────────────────────── */
+        .tabs { display: flex; gap: 24px; margin-bottom: 28px; border-bottom: 1px solid var(--hairline); }
+        .tab {
+            padding: 0 0 12px; cursor: pointer; font-size: 14px; color: var(--muted);
+            border-bottom: 2px solid transparent; margin-bottom: -1px;
+            transition: color 0.15s;
+        }
+        .tab:hover { color: var(--ink-2); }
+        .tab.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 500; }
+
+        /* ─── Stat tiles ─────────────────────────────────── */
+        .stats-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 1px; background: var(--hairline);
+            border: 1px solid var(--hairline); border-radius: 10px;
+            overflow: hidden; margin-bottom: 28px;
+        }
+        .stat-card { background: var(--surface); padding: 18px 20px 20px; }
+        .stat-label {
+            display: flex; align-items: center; gap: 7px;
+            font-size: 12px; color: var(--muted); margin-bottom: 10px;
+        }
+        .stat-value {
+            font-size: 30px; font-weight: 600; color: var(--ink);
+            letter-spacing: -0.02em; line-height: 1.05;
+        }
+        /* Exactly one hero figure per view. */
+        .stat-card.hero .stat-value { font-size: 48px; }
+        .stat-sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+        /* Status dot — the identity channel that never relies on hue alone;
+           it always sits beside a text label. */
+        .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
+        .dot.approved { background: var(--good); }
+        .dot.flagged { background: var(--warning); }
+        .dot.rejected { background: var(--critical); }
+        .dot.exceptions { background: var(--serious); }
+        .dot.pending, .dot.manual_review { background: var(--accent); }
+        .dot.critical { background: var(--critical); }
+        .dot.warning { background: var(--warning); }
+        .dot.info { background: var(--accent); }
+
+        /* ─── Sections & tables ──────────────────────────── */
+        .section {
+            background: var(--surface); border: 1px solid var(--hairline);
+            border-radius: 10px; padding: 22px 24px 24px; margin-bottom: 24px;
+        }
+        .section h2 {
+            font-size: 14px; font-weight: 600; color: var(--ink);
+            margin-bottom: 16px; letter-spacing: -0.005em;
+        }
+        .table-wrap { overflow-x: auto; margin: 0 -24px; padding: 0 24px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th {
+            text-align: left; padding: 0 16px 10px 0; font-weight: 500;
+            color: var(--muted); font-size: 12px;
+            border-bottom: 1px solid var(--grid); white-space: nowrap;
+        }
+        td {
+            padding: 12px 16px 12px 0; border-bottom: 1px solid var(--grid);
+            color: var(--ink-2); vertical-align: middle;
+        }
+        tr:last-child td { border-bottom: none; }
+        tbody tr:hover td { background: var(--wash); }
+        td.num { font-variant-numeric: tabular-nums; color: var(--ink); }
+        code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 12px; color: var(--ink-2);
+        }
+        .empty { padding: 32px 0; text-align: center; color: var(--muted); font-size: 13px; }
+
+        /* ─── Badges ─────────────────────────────────────── */
+        .badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            font-size: 12px; font-weight: 500; color: var(--ink-2); white-space: nowrap;
+        }
+
+        /* ─── Upload ─────────────────────────────────────── */
+        .upload-zone {
+            border: 1px dashed var(--grid); border-radius: 10px; padding: 48px 24px;
+            text-align: center; cursor: pointer; transition: border-color 0.15s, background 0.15s;
+        }
+        .upload-zone:hover { border-color: var(--accent); background: var(--wash); }
+        .upload-zone.dragover { border-color: var(--accent); background: var(--wash); }
+        .upload-zone .glyph { font-size: 28px; margin-bottom: 12px; opacity: 0.55; }
+        .btn {
+            background: var(--ink); color: var(--surface); border: none;
+            padding: 9px 18px; border-radius: 7px; cursor: pointer;
+            font-size: 13px; font-weight: 500; font-family: inherit;
+        }
+        .btn:hover { opacity: 0.88; }
+        .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .result-box {
+            background: var(--wash); border: 1px solid var(--hairline);
+            border-radius: 8px; padding: 16px; margin-top: 20px;
+        }
+        .result-box pre {
+            font-size: 12px; overflow-x: auto; color: var(--ink-2);
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        }
+        .notice {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 13px; padding: 10px 12px; border-radius: 7px;
+            border: 1px solid var(--hairline); background: var(--wash);
+            color: var(--ink-2); margin-top: 16px;
+        }
+        .notice.error { color: var(--critical); }
+        .notice.success { color: var(--good-ink); }
+        .meta { font-size: 12px; color: var(--muted); }
+        .meta strong { color: var(--ink); font-weight: 600; }
+
+        /* Meter: fill carries severity, track is a wash of the same plane. */
+        .progress-bar {
+            width: 100%; height: 4px; background: var(--grid);
+            border-radius: 2px; overflow: hidden; margin-top: 10px;
+        }
+        .progress-fill {
+            height: 100%; background: var(--accent);
+            animation: indeterminate 1.1s ease-in-out infinite;
+        }
+        @keyframes indeterminate {
+            0% { margin-left: -35%; width: 35%; }
+            100% { margin-left: 100%; width: 35%; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .progress-fill { animation: none; width: 45%; }
+        }
     </style>
 </head>
 <body>
@@ -143,20 +308,32 @@
 
             const statusBadge = (status) => {
                 const map = {
-                    approved: "badge-approved",
-                    flagged: "badge-flagged",
-                    rejected: "badge-rejected",
-                    pending: "badge-pending",
-                    manual_review: "badge-pending"
+                    approved: "approved",
+                    flagged: "flagged",
+                    rejected: "rejected",
+                    pending: "pending",
+                    manual_review: "manual_review",
+                    critical: "critical",
+                    warning: "warning",
+                    info: "info"
                 };
-                return <span className={`badge ${map[status] || ""}`}>{status.replace("_", " ").toUpperCase()}</span>;
+                // Dot + label: identity never rests on colour alone.
+                return (
+                    <span className="badge">
+                        <i className={`dot ${map[status] || ""}`}></i>
+                        {status.replace("_", " ").replace(/\b\w/g, c => c.toUpperCase())}
+                    </span>
+                );
             };
 
             return (
                 <div className="app">
                     <div className="header">
-                        <h1>🏦 PacketWise Underwriting Dashboard</h1>
-                        <p>Automated Commercial Loan Intake & Income Verification System</p>
+                        <div>
+                            <h1>PacketWise</h1>
+                            <p>Automated commercial loan intake and income verification</p>
+                        </div>
+                        <span className="live"><i className="dot"></i>Live · refreshes every 5s</span>
                     </div>
 
                     <div className="tabs">
@@ -169,52 +346,58 @@
                     {activeTab === "dashboard" && metrics && (
                         <>
                             <div className="stats-grid">
+                                <div className="stat-card hero">
+                                    <div className="stat-label">Total applications</div>
+                                    <div className="stat-value">{metrics.counts.total.toLocaleString()}</div>
+                                </div>
                                 <div className="stat-card">
-                                    <div className="stat-value">{metrics.counts.total}</div>
-                                    <div className="stat-label">Total Applications</div>
+                                    <div className="stat-label"><i className="dot approved"></i>Approved</div>
+                                    <div className="stat-value">{metrics.counts.approved.toLocaleString()}</div>
+                                    <div className="stat-sub">{(metrics.rates.approval_rate * 100).toFixed(0)}% of total</div>
                                 </div>
-                                <div className="stat-card approved">
-                                    <div className="stat-value">{metrics.counts.approved}</div>
-                                    <div className="stat-label">Approved ({(metrics.rates.approval_rate * 100).toFixed(0)}%)</div>
+                                <div className="stat-card">
+                                    <div className="stat-label"><i className="dot flagged"></i>Flagged</div>
+                                    <div className="stat-value">{metrics.counts.flagged.toLocaleString()}</div>
+                                    <div className="stat-sub">{(metrics.rates.flag_rate * 100).toFixed(0)}% of total</div>
                                 </div>
-                                <div className="stat-card flagged">
-                                    <div className="stat-value">{metrics.counts.flagged}</div>
-                                    <div className="stat-label">Flagged</div>
+                                <div className="stat-card">
+                                    <div className="stat-label"><i className="dot rejected"></i>Rejected</div>
+                                    <div className="stat-value">{metrics.counts.rejected.toLocaleString()}</div>
+                                    <div className="stat-sub">{(metrics.rates.rejection_rate * 100).toFixed(0)}% of total</div>
                                 </div>
-                                <div className="stat-card rejected">
-                                    <div className="stat-value">{metrics.counts.rejected}</div>
-                                    <div className="stat-label">Rejected</div>
-                                </div>
-                                <div className="stat-card exceptions">
-                                    <div className="stat-value">{metrics.exceptions.open}</div>
-                                    <div className="stat-label">Open Exceptions</div>
+                                <div className="stat-card">
+                                    <div className="stat-label"><i className="dot exceptions"></i>Open exceptions</div>
+                                    <div className="stat-value">{metrics.exceptions.open.toLocaleString()}</div>
                                 </div>
                             </div>
                             <div className="section">
-                                <h2>Recent Applications</h2>
-                                <table>
-                                    <thead><tr><th>ID</th><th>Borrower</th><th>Status</th><th>Loan Amount</th><th>DTI</th><th>Date</th></tr></thead>
-                                    <tbody>
-                                        {metrics.recent_applications.map(app => (
-                                            <tr key={app.id}>
-                                                <td><code>{app.id}</code></td>
-                                                <td>{app.borrower}</td>
-                                                <td>{statusBadge(app.status)}</td>
-                                                <td>${app.loan_amount?.toLocaleString() || "N/A"}</td>
-                                                <td>{app.dti ? (app.dti * 100).toFixed(1) + "%" : "N/A"}</td>
-                                                <td>{app.created_at ? new Date(app.created_at).toLocaleDateString() : "N/A"}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                <h2>Recent applications</h2>
+                                <div className="table-wrap">
+                                    <table>
+                                        <thead><tr><th>ID</th><th>Borrower</th><th>Status</th><th>Loan amount</th><th>DTI</th><th>Date</th></tr></thead>
+                                        <tbody>
+                                            {metrics.recent_applications.map(app => (
+                                                <tr key={app.id}>
+                                                    <td><code>{app.id}</code></td>
+                                                    <td>{app.borrower}</td>
+                                                    <td>{statusBadge(app.status)}</td>
+                                                    <td className="num">${app.loan_amount?.toLocaleString() || "—"}</td>
+                                                    <td className="num">{app.dti ? (app.dti * 100).toFixed(1) + "%" : "—"}</td>
+                                                    <td className="num">{app.created_at ? new Date(app.created_at).toLocaleDateString() : "—"}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {!metrics.recent_applications.length && <div className="empty">No applications processed yet.</div>}
                             </div>
                         </>
                     )}
 
                     {activeTab === "upload" && (
                         <div className="section">
-                            <h2>Upload Loan Packet</h2>
-                            <p style={{marginBottom:16,color:"#64748b"}}>Drag and drop loan documents (Application, W-2, Bank Statements, Tax Returns) or click to select files.</p>
+                            <h2>Upload loan packet</h2>
+                            <p className="meta" style={{marginBottom:18}}>Drag and drop loan documents (application, W-2, bank statements, tax returns), or click to select files.</p>
                             <div
                                 className={`upload-zone ${dragOver ? "dragover" : ""}`}
                                 onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -222,27 +405,37 @@
                                 onDrop={handleDrop}
                                 onClick={() => document.getElementById("fileInput").click()}
                             >
-                                <div style={{fontSize:48,marginBottom:12}}>📁</div>
-                                <p style={{fontWeight:500}}>Drop files here or click to browse</p>
-                                <p style={{fontSize:12,color:"#94a3b8",marginTop:8}}>Supported: PDF, PNG, JPG, TIFF (max 25MB)</p>
+                                <div className="glyph">📄</div>
+                                <p style={{fontWeight:500,fontSize:14}}>Drop files here or click to browse</p>
+                                <p className="meta" style={{marginTop:6}}>PDF, PNG, JPG, TIFF · max 25MB</p>
                                 <input id="fileInput" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.tiff" style={{display:"none"}} onChange={(e) => handleUpload(e.target.files)} />
                             </div>
                             {loading && (
-                                <div style={{marginTop:16}}>
-                                    <p>Processing documents...</p>
-                                    <div className="progress-bar"><div className="progress-fill" style={{width:"60%"}}></div></div>
+                                <div style={{marginTop:20}}>
+                                    <p className="meta">Processing documents…</p>
+                                    <div className="progress-bar"><div className="progress-fill"></div></div>
                                 </div>
                             )}
-                            {uploadError && <div className="error">❌ {uploadError}</div>}
+                            {uploadError && (
+                                <div className="notice error"><i className="dot rejected"></i>{uploadError}</div>
+                            )}
                             {uploadResult && (
                                 <div className="result-box">
-                                    <div className={uploadResult.status === "approved" ? "success" : (uploadResult.status === "rejected" ? "error" : "")} style={{marginBottom:12}}>
-                                        <strong>Decision: {uploadResult.status.toUpperCase()}</strong> | 
-                                        Application ID: <code>{uploadResult.application_id}</code> | 
-                                        Processing Time: {uploadResult.processing_time_seconds}s
+                                    <div className="badge" style={{marginBottom:10}}>
+                                        <i className={`dot ${uploadResult.status}`}></i>
+                                        <strong style={{color:"var(--ink)"}}>
+                                            Decision: {uploadResult.status.replace(/\b\w/g, c => c.toUpperCase())}
+                                        </strong>
+                                    </div>
+                                    <div className="meta" style={{marginBottom:14}}>
+                                        <strong>{uploadResult.application_id}</strong> · {uploadResult.processing_time_seconds}s
+                                        · confidence {uploadResult.extraction_confidence}
+                                        · {uploadResult.documents_processed} document(s)
                                     </div>
                                     <pre>{JSON.stringify(uploadResult, null, 2)}</pre>
-                                    {uploadResult.memo_path && <p style={{marginTop:12}}>📄 Exception memo generated: {uploadResult.memo_path}</p>}
+                                    {uploadResult.memo_path && (
+                                        <p className="meta" style={{marginTop:12}}>Exception memo: {uploadResult.memo_path}</p>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -250,44 +443,50 @@
 
                     {activeTab === "applications" && (
                         <div className="section">
-                            <h2>All Applications</h2>
-                            <table>
-                                <thead><tr><th>ID</th><th>Borrower</th><th>Status</th><th>Loan Amount</th><th>Property Value</th><th>DTI</th><th>LTV</th></tr></thead>
-                                <tbody>
-                                    {loans.map(loan => (
-                                        <tr key={loan.id}>
-                                            <td><code>{loan.application_id}</code></td>
-                                            <td>{loan.borrower_name}</td>
-                                            <td>{statusBadge(loan.status)}</td>
-                                            <td>${loan.loan_amount?.toLocaleString()}</td>
-                                            <td>${loan.property_value?.toLocaleString()}</td>
-                                            <td>{loan.dti_ratio ? (loan.dti_ratio * 100).toFixed(1) + "%" : "N/A"}</td>
-                                            <td>{loan.ltv_ratio ? (loan.ltv_ratio * 100).toFixed(1) + "%" : "N/A"}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                            <h2>All applications</h2>
+                            <div className="table-wrap">
+                                <table>
+                                    <thead><tr><th>ID</th><th>Borrower</th><th>Status</th><th>Loan amount</th><th>Property value</th><th>DTI</th><th>LTV</th></tr></thead>
+                                    <tbody>
+                                        {loans.map(loan => (
+                                            <tr key={loan.id}>
+                                                <td><code>{loan.application_id}</code></td>
+                                                <td>{loan.borrower_name}</td>
+                                                <td>{statusBadge(loan.status)}</td>
+                                                <td className="num">${loan.loan_amount?.toLocaleString()}</td>
+                                                <td className="num">${loan.property_value?.toLocaleString()}</td>
+                                                <td className="num">{loan.dti_ratio ? (loan.dti_ratio * 100).toFixed(1) + "%" : "—"}</td>
+                                                <td className="num">{loan.ltv_ratio ? (loan.ltv_ratio * 100).toFixed(1) + "%" : "—"}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {!loans.length && <div className="empty">No applications yet.</div>}
                         </div>
                     )}
 
                     {activeTab === "exceptions" && (
                         <div className="section">
-                            <h2>Underwriting Exceptions</h2>
-                            <table>
-                                <thead><tr><th>ID</th><th>Application</th><th>Severity</th><th>Rule</th><th>Description</th><th>Resolved</th></tr></thead>
-                                <tbody>
-                                    {exceptions.map(exc => (
-                                        <tr key={exc.id}>
-                                            <td>{exc.id}</td>
-                                            <td><code>{exc.application_id}</code></td>
-                                            <td>{statusBadge(exc.severity)}</td>
-                                            <td><code>{exc.rule_code}</code></td>
-                                            <td>{exc.rule_description}</td>
-                                            <td>{exc.resolved ? "✅" : "❌"}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                            <h2>Underwriting exceptions</h2>
+                            <div className="table-wrap">
+                                <table>
+                                    <thead><tr><th>ID</th><th>Application</th><th>Severity</th><th>Rule</th><th>Description</th><th>Status</th></tr></thead>
+                                    <tbody>
+                                        {exceptions.map(exc => (
+                                            <tr key={exc.id}>
+                                                <td className="num">{exc.id}</td>
+                                                <td><code>{exc.application_id}</code></td>
+                                                <td>{statusBadge(exc.severity)}</td>
+                                                <td><code>{exc.rule_code}</code></td>
+                                                <td>{exc.rule_description}</td>
+                                                <td>{exc.resolved ? "Resolved" : "Open"}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {!exceptions.length && <div className="empty">No exceptions recorded.</div>}
                         </div>
                     )}
                 </div>
