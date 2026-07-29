@@ -7,7 +7,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green)](https://fastapi.tiangolo.com)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker)](https://docker.com)
-[![License](https://img.shields.io/badge/License-Apache%202.0-D22128)](LICENSE)
+[![Proprietary](https://img.shields.io/badge/License-Proprietary-lightgrey)](#license)
 
 </div>
 
@@ -163,7 +163,7 @@ What you'll see:
 - Docker containerization for one-command deployment
 - Integration test suite (4/5 pass, 1 skipped pending Windows Tesseract install)
 
-### Performance Metrics
+## Performance Metrics
 
 | Metric | Result |
 |--------|--------|
@@ -172,13 +172,13 @@ What you'll see:
 | Decision accuracy | 100% on test fixtures |
 | Extraction confidence | 0.85–1.0 (source-aware) |
 
-### Key Technical Decisions
+## Key Technical Decisions
 1. **Python-native over UiPath:** Cross-platform, zero licensing, better for East Africa deployment
-2. **SQLite over PostgreSQL (MVP):** Zero-config, file-based, instantly portable
-3. **Keyword classification over ML (MVP):** Fast, no training data needed, extensible to LayoutLM
+2. **SQLite for development, PostgreSQL for production:** zero-config locally, managed Postgres under load
+3. **Keyword classification before ML:** no training data required, extensible to LayoutLM
 4. **HTML memo fallback over PDF-only:** WeasyPrint requires GTK; HTML works everywhere
 
-### Known Limitations & Next Steps
+## Roadmap
 - [ ] Windows Tesseract install for local OCR (works in Docker)
 - [ ] LayoutLM/Donut upgrade for production-grade classification
 - [ ] PostgreSQL migration for multi-user production
@@ -187,13 +187,9 @@ What you'll see:
 
 ## License
 
-Copyright 2026 Mpingo Systems LLC.
+Copyright 2026 Mpingo Systems LLC. All rights reserved.
 
-Licensed under the Apache License, Version 2.0. You may not use this software
-except in compliance with the License. A copy is provided in [LICENSE](LICENSE),
-and is also available at http://www.apache.org/licenses/LICENSE-2.0.
-
-Unless required by applicable law or agreed to in writing, software distributed
-under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-CONDITIONS OF ANY KIND, either express or implied. See the License for the
-specific language governing permissions and limitations under the License.
+This software is proprietary and confidential. No license, express or implied,
+is granted to any person to use, copy, modify, merge, publish, distribute,
+sublicense, or sell copies of this software or any portion of it. Unauthorized
+use, reproduction, or distribution is prohibited.
