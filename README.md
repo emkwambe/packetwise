@@ -132,6 +132,64 @@ packetwise/
 └── data/              # Uploads, DB, memos
 ```
 
+## 2-Minute Demo
+
+```bash
+# 1. Start the server
+docker-compose up --build
+
+# 2. Run the automated demo
+python demo.py
+
+# 3. Open the dashboard
+open http://localhost:8000/
+```
+
+What you'll see:
+- **Dashboard:** Real-time stats on loan decisions (approved/flagged/rejected)
+- **Upload:** Drag-and-drop a loan packet (W-2 + Application + Bank Statement)
+- **Processing:** ~0.02s for text, ~3s for scanned images
+- **Decision:** Instant underwriting with DTI/LTV calculations
+- **Exceptions:** Professional memo generated for flagged/rejected loans
+- **API Docs:** Interactive Swagger at `/docs`
+
+## Project Retrospective
+
+**Duration:** 9 sprints, ~6 hours  
+**Stack:** Python, FastAPI, SQLAlchemy, Tesseract OCR, React, Docker  
+**Role:** Full-stack engineer + PM (agile sprints)
+
+### What Was Built
+- Multi-document IDP pipeline classifying W-2s, Applications, Bank Statements, Tax Returns
+- OCR engine with Tesseract + OpenCV preprocessing (denoising, binarization)
+- Underwriting rule engine with configurable thresholds (YAML)
+- 3-state decision flow: Approved → Core Banking DB, Flagged/Rejected → Exception Memo
+- React dashboard with real-time metrics and exception review
+- Docker containerization for one-command deployment
+- Integration test suite (4/5 pass, 1 skipped pending Windows Tesseract install)
+
+### Performance Metrics
+
+| Metric | Result |
+|--------|--------|
+| Text packet processing | ~0.02s |
+| Image OCR processing | ~3s |
+| Decision accuracy | 100% on test fixtures |
+| Extraction confidence | 0.85–1.0 (source-aware) |
+
+### Key Technical Decisions
+1. **Python-native over UiPath:** Cross-platform, zero licensing, better for East Africa deployment
+2. **SQLite over PostgreSQL (MVP):** Zero-config, file-based, instantly portable
+3. **Keyword classification over ML (MVP):** Fast, no training data needed, extensible to LayoutLM
+4. **HTML memo fallback over PDF-only:** WeasyPrint requires GTK; HTML works everywhere
+
+### Known Limitations & Next Steps
+- [ ] Windows Tesseract install for local OCR (works in Docker)
+- [ ] LayoutLM/Donut upgrade for production-grade classification
+- [ ] PostgreSQL migration for multi-user production
+- [ ] Celery + Redis for async queue processing
+- [ ] Synthetic W-2 dataset integration from RealityDB
+
 ## License
 
 MIT — Built for demonstration and educational purposes.
