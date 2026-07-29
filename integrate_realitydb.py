@@ -25,6 +25,9 @@ try:
   from realitydb_docs.bank_statement import (
     generate_synthetic_bank_statement_batch
   )
+  from realitydb_docs.loan_app import (
+    generate_loan_application_batch
+  )
 except ImportError as e:
   print(f"ERROR: Cannot import realitydb-docs: {e}")
   print("Ensure realitydb-docs is at:")
@@ -48,6 +51,12 @@ SCENARIOS = [
     # DTI = (housing + share * income) / income.
     #   approved: (1900 + 0.05*8500)/8500 = 27.4%  -> clean
     "debt_to_income_target": 0.05,
+    # DTI printed on the 1003. Separate key because the two generators mean
+    # different things by the name: the bank statement's target is the share
+    # of income going to loan payments, the 1003's is the whole ratio. The
+    # engine recomputes DTI from housing + statement debits either way, so
+    # this figure is what the document states, not what decides the file.
+    "loan_app_dti_target": 0.36,
   },
   {
     "name": "flagged",
@@ -60,6 +69,7 @@ SCENARIOS = [
     #   flagged: (2400 + 0.07*6200)/6200 = 45.7% -> over 43% QM, under the
     #   50% critical ceiling, so it stays flagged across the W-2 +/-3% band
     "debt_to_income_target": 0.07,
+    "loan_app_dti_target": 0.45,
   },
   {
     "name": "rejected",
@@ -71,10 +81,17 @@ SCENARIOS = [
     "monthly_housing_payment": 3100,
     #   rejected: credit score 590 is critical on its own
     "debt_to_income_target": 0.10,
+    "loan_app_dti_target": 0.55,
   },
 ]
 
 def make_application_text(scenario: dict, index: int) -> str:
+  """Plain-text 1003 stub.
+
+  Superseded by the generated Form 1003 PDF (see generate_loan_application_batch
+  below) and kept only for --text-application, which is useful when isolating
+  a PDF-extraction problem from an underwriting one.
+  """
   return f"""Uniform Residential Loan Application
 Borrower Name: Test Borrower {index:03d}
 SSN: {scenario["ssn"]}
@@ -85,7 +102,7 @@ Credit Score: {scenario["credit_score"]}
 Monthly Housing Payment: {scenario["monthly_housing_payment"]}
 """
 
-def run(count: int = 10):
+def run(count: int = 10, text_application: bool = False):
   print("=" * 60)
   print("REALITYDB → PACKETWISE INTEGRATION")
   print(f"Processing {count} loan packets")
@@ -152,12 +169,41 @@ def run(count: int = 10):
       print(f"  ERROR generating bank statements: {e}")
       sys.exit(1)
 
+    print(f"\n[3/4] Generating Form 1003 loan applications per scenario...")
+    loan_groups = {}
+    if not text_application:
+      try:
+        for s_idx, scenario in enumerate(SCENARIOS):
+          if s_idx not in w2_groups:
+            continue
+          n = len(w2_groups[s_idx])
+          annual_income = scenario["gross_monthly_income"] * 12
+          # credit_score and monthly_housing_payment are passed explicitly:
+          # the underwriting engine reads both off the application, and DTI is
+          # (housing + statement debits) / income — so a 1003 without them
+          # would silently change every scenario's outcome.
+          loan_groups[s_idx] = generate_loan_application_batch(
+            count=n,
+            output_dir=os.path.join(tmpdir, f"loan_{scenario['name']}"),
+            seed_start=200 + s_idx * 50,
+            annual_incomes=[annual_income],
+            loan_amounts=[scenario["loan_amount"]],
+            property_values=[scenario["property_value"]],
+            debt_to_income_targets=[scenario["loan_app_dti_target"]],
+            credit_scores=[scenario["credit_score"]],
+            monthly_housing_payments=[scenario["monthly_housing_payment"]],
+          )
+      except Exception as e:
+        print(f"  ERROR generating loan applications: {e}")
+        sys.exit(1)
+
     total_docs = sum(len(v) for v in w2_groups.values())
-    print(f"  ✓ Generated {total_docs} W-2s and "
-          f"{sum(len(v) for v in bank_groups.values())} bank statements")
+    print(f"  ✓ Generated {total_docs} W-2s, "
+          f"{sum(len(v) for v in bank_groups.values())} bank statements and "
+          f"{sum(len(v) for v in loan_groups.values())} loan applications")
 
     # Process packets
-    print(f"\n[3/3] Sending to PacketWise...")
+    print(f"\n[4/4] Sending to PacketWise...")
     results = {
       "approved": 0,
       "flagged": 0,
@@ -172,10 +218,15 @@ def run(count: int = 10):
       w2_path = w2_groups[s_idx][k]
       bank_path = bank_groups[s_idx][k]
 
-      app_path = Path(tmpdir) / f"app_{i:03d}.txt"
-      app_path.write_text(
-        make_application_text(scenario, i + 1)
-      )
+      if text_application:
+        app_path = Path(tmpdir) / f"app_{i:03d}.txt"
+        app_path.write_text(
+          make_application_text(scenario, i + 1)
+        )
+        app_mime = "text/plain"
+      else:
+        app_path = Path(loan_groups[s_idx][k])
+        app_mime = "application/pdf"
 
       try:
         with open(w2_path, "rb") as w2f, \
@@ -190,7 +241,7 @@ def run(count: int = 10):
               ("files", (Path(bank_path).name,
                 bankf, "application/pdf")),
               ("files", (app_path.name,
-                appf, "text/plain")),
+                appf, app_mime)),
             ],
             timeout=60,
           )
@@ -281,5 +332,10 @@ if __name__ == "__main__":
     "--count", type=int, default=10,
     help="Number of loan packets to process"
   )
+  parser.add_argument(
+    "--text-application", action="store_true",
+    help="Send the plain-text 1003 stub instead of the generated PDF "
+         "(isolates PDF extraction from underwriting when debugging)"
+  )
   args = parser.parse_args()
-  run(count=args.count)
+  run(count=args.count, text_application=args.text_application)

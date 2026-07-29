@@ -12,8 +12,19 @@ DOC_SIGNATURES = {
         "score_threshold": 2
     },
     DocType.APPLICATION: {
-        "required": ["loan application", "mortgage application", "uniform residential"],
-        "strong": ["borrower", "loan amount", "property value", "credit score", "monthly income"],
+        # "fannie mae form 1003" and the section banners come from the
+        # generated 1003 PDFs (realitydb-docs loan_app.py); the plain-text
+        # fixtures match on the first three alone.
+        "required": [
+            "loan application", "mortgage application", "uniform residential",
+            "uniform residential loan application", "fannie mae form 1003",
+        ],
+        "strong": [
+            "borrower", "loan amount", "property value", "credit score",
+            "monthly income", "gross monthly income", "estimated dti",
+            "section 1", "section 2", "down payment", "declarations",
+            "ltv ratio", "loan purpose", "total monthly debt",
+        ],
         "score_threshold": 2
     },
     DocType.BANK_STATEMENT: {

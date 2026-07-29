@@ -207,7 +207,66 @@ class OCRExtractor:
             r"(?:Monthly\s*Mortgage\s*Payment[,:]?\s*)([\d,]+\.?\d*)",
         ]
         data["monthly_housing_payment"] = self._extract_amount(text, patterns_housing)
-        
+
+        # ── Fannie Mae 1003 fields (realitydb-docs loan_app.py) ──
+        # The plain-text fixtures carry only the handful of fields above; a
+        # generated 1003 PDF also states purpose, property type, employment,
+        # the liability total, and its own LTV/DTI. Every pattern below is
+        # optional, so a fixture that omits them still parses.
+
+        # `gross_monthly_income` is the 1003's own label. The stated_income_*
+        # keys are kept as-is because the rule engine reads them.
+        if data.get("stated_income_monthly") is not None:
+            data["gross_monthly_income"] = data["stated_income_monthly"]
+
+        # Sum of the borrower's monthly liabilities as printed on the form.
+        data["monthly_debt"] = self._extract_amount(text, [
+            r"(?:Total\s*Monthly\s*Debt[,:]?\s*)([\d,]+\.?\d*)",
+        ])
+
+        # Last four SSN digits only — the full number is never persisted.
+        if data.get("ssn"):
+            data["ssn_last4"] = data["ssn"][-4:]
+
+        purpose = re.search(r"Loan\s*Purpose[,:]?\s*(Purchase|Refinance)",
+                            text, re.IGNORECASE)
+        if purpose:
+            data["loan_purpose"] = purpose.group(1).strip().title()
+
+        # Property type is a free-text label ("Single Family",
+        # "Multi-Family (2-4 units)"), so it is read to end of line.
+        prop_type = re.search(r"Property\s*Type[,:]?\s*([^\n]+)", text, re.IGNORECASE)
+        if prop_type:
+            data["property_type"] = prop_type.group(1).strip()
+
+        # Hyphen is intentional: "Self-Employed" would otherwise truncate to
+        # "Self" under a \w+ match.
+        emp_type = re.search(r"Employment\s*Type[,:]?\s*([A-Za-z\-]+)",
+                             text, re.IGNORECASE)
+        if emp_type:
+            data["employment_type"] = emp_type.group(1).strip()
+
+        dti = re.search(r"Estimated\s*DTI[,:]?\s*([\d.]+)\s*%", text, re.IGNORECASE)
+        if dti:
+            try:
+                # Stored as a ratio to match dti_ratio elsewhere in the app.
+                data["estimated_dti"] = round(float(dti.group(1)) / 100, 4)
+            except ValueError:
+                pass
+
+        # Prefer the LTV the form states; otherwise derive it, so downstream
+        # underwriting always has a value when both amounts are present.
+        ltv = re.search(r"LTV\s*Ratio[,:]?\s*([\d.]+)\s*%", text, re.IGNORECASE)
+        if ltv:
+            try:
+                data["ltv_ratio"] = round(float(ltv.group(1)) / 100, 4)
+            except ValueError:
+                pass
+        if data.get("ltv_ratio") is None:
+            loan, prop = data.get("loan_amount"), data.get("property_value")
+            if loan and prop:
+                data["ltv_ratio"] = round(loan / prop, 4)
+
         return data
     
     # Recurring obligations that belong in a debt-to-income calculation.

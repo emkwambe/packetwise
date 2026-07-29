@@ -7,6 +7,7 @@
 | S-013  | Supabase | 0.520   | 0.800   | 0.200   | ~115 pkt/min| 88.9%    | 3-doc packets (W-2 + bank stmt + app), 9 packet sample |
 | S-014  | Supabase | 0.450   | 0.634   | 0.199   | 133 pkt/min | 100%     | 30 packets, 3 docs each, 10/10/10 |
 | S-014  | SQLite   | 0.057   | 0.101   | 0.028   | 1049 pkt/min| 100%     | Same 30 packets, same host, same run |
+| S-015  | Supabase | 0.472   | 0.600   | 0.230   | 127 pkt/min | 100%     | 9 packets, 3 generated PDFs each (W-2 + bank stmt + Form 1003), 3/3/3 |
 
 ## Sprint 14 — clean backend comparison
 
@@ -65,6 +66,20 @@ occasionally crossing the 50% critical ceiling.
   against extraction correctness. Extraction confidence was 1.0 on all 9. The
   single miss (flagged → rejected, DTI 51.7%) is ISSUE-005, a fixture-margin
   problem rather than a pipeline error.
+
+## Sprint 15 notes
+
+- S-015 is the first run where **all three documents are generated PDFs**. The
+  text application stub became a two-page Form 1003 PDF, so the pipeline now
+  parses three PDFs per packet instead of two PDFs plus a text file.
+- 0.472s vs S-014's 0.450s on the same backend: within noise on a 9-packet
+  sample, so replacing the stub with a real PDF cost little or nothing
+  measurable. It is **not** comparable to the S-014 SQLite row (0.057s) — that
+  is a different backend, and the gap there is database latency, not parsing.
+- Accuracy 100% (9/9) is measured against the scenario each packet was built
+  for. Extraction confidence was 1.0 on all nine.
+- Averages are over the nine packets of the run. `/report/performance` reported
+  0.499s at the same moment because it averages every row in the database.
 
 ## Caveats
 
