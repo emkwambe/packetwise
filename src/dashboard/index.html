@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PacketWise Dashboard</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f1f5f9; color: #1e293b; }
+        .app { max-width: 1400px; margin: 0 auto; padding: 24px; }
+        .header { background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); color: white; padding: 32px; border-radius: 12px; margin-bottom: 24px; }
+        .header h1 { font-size: 28px; margin-bottom: 8px; }
+        .header p { opacity: 0.8; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .stat-card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-left: 4px solid #3b82f6; }
+        .stat-card.approved { border-left-color: #22c55e; }
+        .stat-card.flagged { border-left-color: #f59e0b; }
+        .stat-card.rejected { border-left-color: #ef4444; }
+        .stat-card.exceptions { border-left-color: #8b5cf6; }
+        .stat-value { font-size: 32px; font-weight: 700; color: #1e293b; }
+        .stat-label { font-size: 13px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+        .section { background: white; border-radius: 10px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .section h2 { font-size: 18px; margin-bottom: 16px; color: #1e3a5f; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th { text-align: left; padding: 12px; background: #f8fafc; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0; }
+        td { padding: 12px; border-bottom: 1px solid #e2e8f0; }
+        .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+        .badge-approved { background: #dcfce7; color: #166534; }
+        .badge-flagged { background: #fef3c7; color: #92400e; }
+        .badge-rejected { background: #fee2e2; color: #991b1b; }
+        .badge-pending { background: #e0e7ff; color: #3730a3; }
+        .upload-zone { border: 2px dashed #cbd5e1; border-radius: 10px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.2s; }
+        .upload-zone:hover { border-color: #3b82f6; background: #f8fafc; }
+        .upload-zone.dragover { border-color: #3b82f6; background: #eff6ff; }
+        .btn { background: #1e3a5f; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; }
+        .btn:hover { background: #0f172a; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .result-box { background: #f8fafc; border-radius: 8px; padding: 16px; margin-top: 16px; }
+        .result-box pre { font-size: 12px; overflow-x: auto; }
+        .error { color: #ef4444; background: #fef2f2; padding: 12px; border-radius: 6px; margin-top: 12px; }
+        .success { color: #166534; background: #dcfce7; padding: 12px; border-radius: 6px; margin-top: 12px; }
+        .tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 2px solid #e2e8f0; }
+        .tab { padding: 10px 20px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; font-weight: 500; }
+        .tab.active { border-bottom-color: #1e3a5f; color: #1e3a5f; }
+        .progress-bar { width: 100%; height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden; margin-top: 8px; }
+        .progress-fill { height: 100%; background: #3b82f6; transition: width 0.3s; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useCallback } = React;
+        const API_BASE = "http://localhost:8000/api/v1";
+
+        function App() {
+            const [activeTab, setActiveTab] = useState("dashboard");
+            const [metrics, setMetrics] = useState(null);
+            const [loans, setLoans] = useState([]);
+            const [exceptions, setExceptions] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [uploadResult, setUploadResult] = useState(null);
+            const [uploadError, setUploadError] = useState(null);
+            const [dragOver, setDragOver] = useState(false);
+
+            const fetchDashboard = useCallback(async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/metrics/dashboard`);
+                    const data = await res.json();
+                    setMetrics(data);
+                } catch (e) { console.error(e); }
+            }, []);
+
+            const fetchLoans = useCallback(async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/core-banking/loans`);
+                    const data = await res.json();
+                    setLoans(data);
+                } catch (e) { console.error(e); }
+            }, []);
+
+            const fetchExceptions = useCallback(async () => {
+                try {
+                    const res = await fetch(`${API_BASE}/core-banking/exceptions`);
+                    const data = await res.json();
+                    setExceptions(data);
+                } catch (e) { console.error(e); }
+            }, []);
+
+            useEffect(() => {
+                fetchDashboard();
+                const interval = setInterval(fetchDashboard, 5000);
+                return () => clearInterval(interval);
+            }, [fetchDashboard]);
+
+            useEffect(() => {
+                if (activeTab === "applications") fetchLoans();
+                if (activeTab === "exceptions") fetchExceptions();
+            }, [activeTab, fetchLoans, fetchExceptions]);
+
+            const handleUpload = async (files) => {
+                if (!files.length) return;
+                setLoading(true);
+                setUploadResult(null);
+                setUploadError(null);
+
+                const formData = new FormData();
+                for (const f of files) formData.append("files", f);
+
+                try {
+                    const res = await fetch(`${API_BASE}/process`, { method: "POST", body: formData });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.detail || "Processing failed");
+                    setUploadResult(data);
+                    fetchDashboard();
+                } catch (e) {
+                    setUploadError(e.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleDrop = (e) => {
+                e.preventDefault();
+                setDragOver(false);
+                handleUpload(e.dataTransfer.files);
+            };
+
+            const statusBadge = (status) => {
+                const map = {
+                    approved: "badge-approved",
+                    flagged: "badge-flagged",
+                    rejected: "badge-rejected",
+                    pending: "badge-pending",
+                    manual_review: "badge-pending"
+                };
+                return <span className={`badge ${map[status] || ""}`}>{status.replace("_", " ").toUpperCase()}</span>;
+            };
+
+            return (
+                <div className="app">
+                    <div className="header">
+                        <h1>🏦 PacketWise Underwriting Dashboard</h1>
+                        <p>Automated Commercial Loan Intake & Income Verification System</p>
+                    </div>
+
+                    <div className="tabs">
+                        <div className={`tab ${activeTab === "dashboard" ? "active" : ""}`} onClick={() => setActiveTab("dashboard")}>Dashboard</div>
+                        <div className={`tab ${activeTab === "upload" ? "active" : ""}`} onClick={() => setActiveTab("upload")}>Upload & Process</div>
+                        <div className={`tab ${activeTab === "applications" ? "active" : ""}`} onClick={() => setActiveTab("applications")}>Applications</div>
+                        <div className={`tab ${activeTab === "exceptions" ? "active" : ""}`} onClick={() => setActiveTab("exceptions")}>Exceptions</div>
+                    </div>
+
+                    {activeTab === "dashboard" && metrics && (
+                        <>
+                            <div className="stats-grid">
+                                <div className="stat-card">
+                                    <div className="stat-value">{metrics.counts.total}</div>
+                                    <div className="stat-label">Total Applications</div>
+                                </div>
+                                <div className="stat-card approved">
+                                    <div className="stat-value">{metrics.counts.approved}</div>
+                                    <div className="stat-label">Approved ({(metrics.rates.approval_rate * 100).toFixed(0)}%)</div>
+                                </div>
+                                <div className="stat-card flagged">
+                                    <div className="stat-value">{metrics.counts.flagged}</div>
+                                    <div className="stat-label">Flagged</div>
+                                </div>
+                                <div className="stat-card rejected">
+                                    <div className="stat-value">{metrics.counts.rejected}</div>
+                                    <div className="stat-label">Rejected</div>
+                                </div>
+                                <div className="stat-card exceptions">
+                                    <div className="stat-value">{metrics.exceptions.open}</div>
+                                    <div className="stat-label">Open Exceptions</div>
+                                </div>
+                            </div>
+                            <div className="section">
+                                <h2>Recent Applications</h2>
+                                <table>
+                                    <thead><tr><th>ID</th><th>Borrower</th><th>Status</th><th>Loan Amount</th><th>DTI</th><th>Date</th></tr></thead>
+                                    <tbody>
+                                        {metrics.recent_applications.map(app => (
+                                            <tr key={app.id}>
+                                                <td><code>{app.id}</code></td>
+                                                <td>{app.borrower}</td>
+                                                <td>{statusBadge(app.status)}</td>
+                                                <td>${app.loan_amount?.toLocaleString() || "N/A"}</td>
+                                                <td>{app.dti ? (app.dti * 100).toFixed(1) + "%" : "N/A"}</td>
+                                                <td>{app.created_at ? new Date(app.created_at).toLocaleDateString() : "N/A"}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </>
+                    )}
+
+                    {activeTab === "upload" && (
+                        <div className="section">
+                            <h2>Upload Loan Packet</h2>
+                            <p style={{marginBottom:16,color:"#64748b"}}>Drag and drop loan documents (Application, W-2, Bank Statements, Tax Returns) or click to select files.</p>
+                            <div
+                                className={`upload-zone ${dragOver ? "dragover" : ""}`}
+                                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                                onDragLeave={() => setDragOver(false)}
+                                onDrop={handleDrop}
+                                onClick={() => document.getElementById("fileInput").click()}
+                            >
+                                <div style={{fontSize:48,marginBottom:12}}>📁</div>
+                                <p style={{fontWeight:500}}>Drop files here or click to browse</p>
+                                <p style={{fontSize:12,color:"#94a3b8",marginTop:8}}>Supported: PDF, PNG, JPG, TIFF (max 25MB)</p>
+                                <input id="fileInput" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.tiff" style={{display:"none"}} onChange={(e) => handleUpload(e.target.files)} />
+                            </div>
+                            {loading && (
+                                <div style={{marginTop:16}}>
+                                    <p>Processing documents...</p>
+                                    <div className="progress-bar"><div className="progress-fill" style={{width:"60%"}}></div></div>
+                                </div>
+                            )}
+                            {uploadError && <div className="error">❌ {uploadError}</div>}
+                            {uploadResult && (
+                                <div className="result-box">
+                                    <div className={uploadResult.status === "approved" ? "success" : (uploadResult.status === "rejected" ? "error" : "")} style={{marginBottom:12}}>
+                                        <strong>Decision: {uploadResult.status.toUpperCase()}</strong> | 
+                                        Application ID: <code>{uploadResult.application_id}</code> | 
+                                        Processing Time: {uploadResult.processing_time_seconds}s
+                                    </div>
+                                    <pre>{JSON.stringify(uploadResult, null, 2)}</pre>
+                                    {uploadResult.memo_path && <p style={{marginTop:12}}>📄 Exception memo generated: {uploadResult.memo_path}</p>}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {activeTab === "applications" && (
+                        <div className="section">
+                            <h2>All Applications</h2>
+                            <table>
+                                <thead><tr><th>ID</th><th>Borrower</th><th>Status</th><th>Loan Amount</th><th>Property Value</th><th>DTI</th><th>LTV</th></tr></thead>
+                                <tbody>
+                                    {loans.map(loan => (
+                                        <tr key={loan.id}>
+                                            <td><code>{loan.application_id}</code></td>
+                                            <td>{loan.borrower_name}</td>
+                                            <td>{statusBadge(loan.status)}</td>
+                                            <td>${loan.loan_amount?.toLocaleString()}</td>
+                                            <td>${loan.property_value?.toLocaleString()}</td>
+                                            <td>{loan.dti_ratio ? (loan.dti_ratio * 100).toFixed(1) + "%" : "N/A"}</td>
+                                            <td>{loan.ltv_ratio ? (loan.ltv_ratio * 100).toFixed(1) + "%" : "N/A"}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+
+                    {activeTab === "exceptions" && (
+                        <div className="section">
+                            <h2>Underwriting Exceptions</h2>
+                            <table>
+                                <thead><tr><th>ID</th><th>Application</th><th>Severity</th><th>Rule</th><th>Description</th><th>Resolved</th></tr></thead>
+                                <tbody>
+                                    {exceptions.map(exc => (
+                                        <tr key={exc.id}>
+                                            <td>{exc.id}</td>
+                                            <td><code>{exc.application_id}</code></td>
+                                            <td>{statusBadge(exc.severity)}</td>
+                                            <td><code>{exc.rule_code}</code></td>
+                                            <td>{exc.rule_description}</td>
+                                            <td>{exc.resolved ? "✅" : "❌"}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+</body>
+</html>

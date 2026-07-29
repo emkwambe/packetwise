@@ -1,0 +1,9 @@
+Uniform Residential Loan Application
+Borrower Name: Mike Risky
+SSN: 555-55-5555
+Loan Amount: 480000
+Property Value: 500000
+Purchase Price: 500000
+Gross Monthly Income: 4500
+Credit Score: 580
+Monthly Housing Payment: 3200

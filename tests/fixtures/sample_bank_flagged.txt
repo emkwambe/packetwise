@@ -1,0 +1,11 @@
+Bank Statement
+Wells Fargo
+Account: ****5678
+Statement Period: March 1 - March 31, 2024
+Beginning Balance: 4200.00
+Ending Balance: 3800.00
+Total Deposits: 6250.00
+Total Withdrawals: 6650.00
+
+Auto Loan: 450.00
+Student Loan: 320.00

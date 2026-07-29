@@ -1,0 +1,13 @@
+Bank Statement
+Bank of America
+Account: ****9999
+Statement Period: March 1 - March 31, 2024
+Beginning Balance: 800.00
+Ending Balance: 200.00
+Total Deposits: 4500.00
+Total Withdrawals: 5100.00
+
+Auto Loan: 650.00
+Student Loan: 520.00
+Credit Card: 480.00
+Personal Loan: 350.00

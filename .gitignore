@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Data
+data/packetwise.db
+data/uploads/*
+data/processed/*
+data/exceptions/*
+!data/uploads/.gitkeep
+!data/processed/.gitkeep
+!data/exceptions/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env

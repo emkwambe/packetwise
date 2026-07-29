@@ -1,0 +1,9 @@
+Uniform Residential Loan Application
+Borrower Name: John Doe
+SSN: 123-45-6789
+Loan Amount: 400000
+Property Value: 500000
+Purchase Price: 500000
+Gross Monthly Income: 8500
+Credit Score: 720
+Monthly Housing Payment: 2500

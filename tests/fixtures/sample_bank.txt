@@ -1,0 +1,12 @@
+Bank Statement
+Chase Bank
+Account: ****1234
+Statement Period: March 1 - March 31, 2024
+Beginning Balance: 15000.00
+Ending Balance: 18000.00
+Total Deposits: 8500.00
+Total Withdrawals: 5500.00
+
+Auto Loan: 200.00
+Student Loan: 150.00
+Credit Card: 125.00

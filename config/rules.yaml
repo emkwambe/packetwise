@@ -1,0 +1,46 @@
+# Underwriting Business Rules Configuration
+# All ratios are expressed as decimals (e.g., 0.43 = 43%)
+
+thresholds:
+  dti_qualified_mortgage: 0.43
+  dti_absolute_maximum: 0.50
+  min_credit_score: 620
+  max_ltv_ratio: 0.80
+  min_reserve_months: 2
+  max_loan_amount: 1000000.00
+
+income_verification:
+  # Tolerance for stated income vs. documented income variance
+  variance_tolerance_percent: 0.10
+  # Minimum documentation required
+  required_docs: ["application", "w2"]
+  # Optional but strengthens file
+  supplementary_docs: ["bank_statement", "tax_return"]
+
+debt_calculation:
+  # Items to include in monthly debt
+  include:
+    - housing_payment
+    - auto_loans
+    - student_loans
+    - credit_card_min_payments
+    - child_support
+    - alimony
+  # Items to exclude
+  exclude:
+    - utilities
+    - insurance
+    - groceries
+
+exception_severity:
+  critical:   # Auto-reject or mandatory manual review
+    - dti_exceeds_absolute_max
+    - missing_required_document
+    - fraud_indicators
+  warning:    # Flag for underwriter attention
+    - dti_exceeds_qm_threshold
+    - income_variance_over_tolerance
+    - insufficient_reserves
+  info:       # Noted but not blocking
+    - supplementary_doc_missing
+    - low_confidence_extraction
