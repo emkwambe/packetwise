@@ -1,7 +1,7 @@
 """Document type classifier using heuristics + keyword matching.
 Extensible to LayoutLM/Donut for production."""
 import re
-from typing import Tuple
+from typing import Dict, List, Tuple
 from src.idp.schemas import DocType
 
 # Keyword signatures for classification
@@ -43,11 +43,40 @@ DOC_SIGNATURES = {
         "score_threshold": 2
     },
     DocType.PAY_STUB: {
-        "required": ["pay stub", "pay statement", "earnings statement"],
-        "strong": ["gross pay", "net pay", "ytd", "deductions", "pay period"],
+        # Every keyword below appears in a realitydb-docs pay stub: the
+        # banner title, the two section labels, each deduction row label,
+        # the totals rows, and the direct-deposit footer.
+        "required": [
+            "pay stub", "pay statement", "earnings statement",
+            "payroll statement",
+        ],
+        "strong": [
+            "gross pay", "net pay", "ytd", "deductions", "pay period",
+            "regular pay", "federal income tax", "social security tax",
+            "medicare tax", "total deductions",
+            "direct deposit to account", "bi-weekly",
+        ],
         "score_threshold": 2
     }
 }
+
+
+def matched_keywords(text: str, doc_type: DocType) -> Dict[str, List[str]]:
+    """Which signature keywords a document actually hit.
+
+    Split out rather than folded into classify_document's return value:
+    that returns a 2-tuple and every caller unpacks it positionally, so
+    widening it would be a breaking change for no gain. Useful when a
+    classification needs explaining.
+    """
+    text_lower = text.lower()
+    sig = DOC_SIGNATURES.get(doc_type)
+    if not sig:
+        return {"required": [], "strong": []}
+    return {
+        "required": [kw for kw in sig["required"] if kw in text_lower],
+        "strong": [kw for kw in sig["strong"] if kw in text_lower],
+    }
 
 def classify_document(text: str) -> Tuple[DocType, float]:
     """

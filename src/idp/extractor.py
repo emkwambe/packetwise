@@ -11,7 +11,7 @@ import numpy as np
 
 from src.idp.schemas import (
     DocType, ExtractionResult, W2Data, ApplicationData,
-    BankStatementData, TaxReturnData
+    BankStatementData, TaxReturnData, PayStubData
 )
 from src.idp.classifier import classify_document
 
@@ -73,17 +73,21 @@ class OCRExtractor:
         raw_text = self.extract_text(file_path)
         doc_type, base_confidence = classify_document(raw_text)
 
-        # Confidence modifiers
-        confidence = base_confidence
+        # Confidence modifiers. Held as a separate multiplier so a document
+        # type that scores itself from extracted fields (pay stubs) is still
+        # penalised for coming in as a scan.
+        media_penalty = 1.0
         ext = Path(file_path).suffix.lower().lstrip(".")
 
         # Reduce if file is image (OCR less reliable than native text)
         if ext in ("png", "jpg", "jpeg", "tiff"):
-            confidence *= 0.85  # OCR penalty
+            media_penalty *= 0.85  # OCR penalty
 
         # Reduce if PDF required OCR fallback (no native text extracted)
         if ext == "pdf" and not raw_text.strip():
-            confidence *= 0.80  # Scanned PDF penalty
+            media_penalty *= 0.80  # Scanned PDF penalty
+
+        confidence = base_confidence * media_penalty
 
         errors = []
         extracted = {}
@@ -97,7 +101,13 @@ class OCRExtractor:
                 extracted = self._parse_bank_statement(raw_text)
             elif doc_type == DocType.TAX_RETURN:
                 extracted = self._parse_tax_return(raw_text)
+            elif doc_type == DocType.PAY_STUB:
+                extracted = self._parse_pay_stub(raw_text)
             else:
+                # Reached only when classification itself failed. A document
+                # that classified but has no parser used to land here too,
+                # which reported "could not classify" for a document that had
+                # been classified perfectly well (ISSUE-009).
                 errors.append("Could not classify document type")
                 confidence *= 0.5
         except Exception as e:
@@ -108,6 +118,14 @@ class OCRExtractor:
         if doc_type == DocType.W2 and not extracted.get("wages_box_1"):
             confidence *= 0.7
             errors.append("Could not extract Box 1 wages")
+
+        # A pay stub's confidence is earned from the fields actually parsed
+        # rather than from keyword density, then carries the same media
+        # penalty as every other document type.
+        if doc_type == DocType.PAY_STUB:
+            stub_score, stub_errors = self._score_pay_stub(extracted)
+            confidence = stub_score * media_penalty
+            errors.extend(stub_errors)
 
         return ExtractionResult(
             document_type=doc_type,
@@ -145,13 +163,31 @@ class OCRExtractor:
         ]
         data["medicare_wages_box_5"] = self._extract_amount(text, patterns_box5)
         
-        emp_match = re.search(r"(?:Employer\s*\(?.?\)?\s*name[,:]?\s*)([^\n]+)", text, re.IGNORECASE)
-        if emp_match:
-            data["employer_name"] = emp_match.group(1).strip()
-        
-        emp_match2 = re.search(r"(?:Employee\s*\(?.?\)?\s*name[,:]?\s*)([^\n]+)", text, re.IGNORECASE)
-        if emp_match2:
-            data["employee_name"] = emp_match2.group(1).strip()
+        # The W-2's identity block is two columns, so the employer and
+        # employee labels are emitted as one pair of lines and their values as
+        # the next pair:
+        #
+        #   c Employer name and address
+        #   e/f Employee name and address
+        #   Graphic Design Institute      <- employer
+        #   Andrew Myers                  <- employee
+        #
+        # A same-line `Employer name[:,]?\s*([^\n]+)` therefore captured the
+        # remainder of the LABEL — every W-2 processed before this fix stored
+        # "and address" as both the employer and the employee name.
+        names = self._parse_w2_identity_block(text)
+        data.update(names)
+
+        # Single-column fallback for fixtures that do put the value on the
+        # label's line ("Employer name: Acme Corporation").
+        if not data.get("employer_name"):
+            m = re.search(r"Employer\s*name[,:]\s*([^\n]+)", text, re.IGNORECASE)
+            if m:
+                data["employer_name"] = m.group(1).strip()
+        if not data.get("employee_name"):
+            m = re.search(r"Employee\s*name[,:]\s*([^\n]+)", text, re.IGNORECASE)
+            if m:
+                data["employee_name"] = m.group(1).strip()
         
         ssn_match = re.search(r"(\d{3}-\d{2}-\d{4})", text)
         if ssn_match:
@@ -163,6 +199,200 @@ class OCRExtractor:
         
         return data
     
+    def _parse_w2_identity_block(self, text: str) -> Dict[str, Any]:
+        """Employer and employee names from the two-column identity block.
+
+        Locates the employer-name label, then the employee-name label that
+        follows it, then reads the next two non-blank lines as the two values
+        in the same left-to-right order the labels appeared in.
+        """
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        out: Dict[str, Any] = {}
+
+        employer_idx = employee_idx = None
+        for i, line in enumerate(lines):
+            if employer_idx is None and re.search(
+                r"Employer\s*name", line, re.IGNORECASE
+            ):
+                employer_idx = i
+            elif employer_idx is not None and employee_idx is None and re.search(
+                r"Employee\s*name", line, re.IGNORECASE
+            ):
+                employee_idx = i
+                break
+
+        if employer_idx is None or employee_idx != employer_idx + 1:
+            return out
+
+        values = lines[employee_idx + 1: employee_idx + 3]
+        if len(values) >= 1 and not self._looks_like_label(values[0]):
+            out["employer_name"] = values[0]
+        if len(values) >= 2 and not self._looks_like_label(values[1]):
+            out["employee_name"] = values[1]
+        return out
+
+    @staticmethod
+    def _looks_like_label(line: str) -> bool:
+        """Guard against reading a form label as if it were a value."""
+        return bool(re.search(
+            r"name\s+and\s+address|^\d+\s|wages|withheld|social security",
+            line, re.IGNORECASE,
+        ))
+
+    # Every value on a realitydb-docs pay stub sits on the line AFTER its
+    # label — the panels are two-column, so reportlab emits both labels then
+    # both values. `\s+` spans the newline, so a label followed by one or two
+    # amounts reads as "LABEL <current> <ytd>".
+    _STUB_MONEY = r"([\d,]*\.?\d+)"
+
+    def _parse_pay_stub(self, text: str) -> Dict[str, Any]:
+        """Parse a bi-weekly pay stub (realitydb-docs paystub.py layout).
+
+        Two views of the text are needed: amounts are read from a
+        comma-stripped copy so a single numeric pattern works, but the pay
+        period dates are rendered "October 23, 2024" and stripping commas
+        would destroy them.
+        """
+        data: Dict[str, Any] = {}
+        raw = text
+        stripped = text.replace(",", "").replace("$", "")
+
+        def pair(label: str) -> tuple:
+            """Current and YTD amounts for one table row."""
+            m = re.search(
+                rf"{label}[^\n]*\s+{self._STUB_MONEY}\s+{self._STUB_MONEY}",
+                stripped, re.IGNORECASE,
+            )
+            if not m:
+                return (None, None)
+            try:
+                return (float(m.group(1)), float(m.group(2)))
+            except ValueError:
+                return (None, None)
+
+        def line_after(label: str) -> Optional[str]:
+            m = re.search(rf"{label}\s*\n\s*([^\n]+)", raw, re.IGNORECASE)
+            return m.group(1).strip() if m else None
+
+        # ── Earnings and deductions ──
+        data["gross_pay"], data["ytd_gross"] = pair(r"GROSS\s+PAY")
+        if data["gross_pay"] is None:
+            data["gross_pay"], data["ytd_gross"] = pair(r"Regular\s+Pay")
+        data["net_pay"], data["ytd_net_pay"] = pair(r"NET\s+PAY")
+        data["federal_tax_withheld"], data["ytd_federal_tax"] = pair(
+            r"Federal\s+Income\s+Tax")
+        # The row is labelled with the state code, e.g. "NC State Income Tax".
+        data["state_tax_withheld"], data["ytd_state_tax"] = pair(
+            r"State\s+Income\s+Tax")
+        data["ss_tax_withheld"], data["ytd_ss_tax"] = pair(
+            r"Social\s+Security\s+Tax")
+        data["medicare_tax_withheld"], data["ytd_medicare_tax"] = pair(
+            r"Medicare\s+Tax")
+        # Absent entirely when the borrower defers nothing.
+        data["retirement_deduction"], data["ytd_retirement"] = pair(
+            r"401\(k\)")
+        data["total_deductions"], _ = pair(r"TOTAL\s+DEDUCTIONS")
+
+        # Taxable YTD is stated on the stub. Fall back to deriving it, so the
+        # W-2 cross-check still has a figure if the line is ever dropped.
+        data["ytd_taxable"] = self._extract_amount(stripped, [
+            r"Taxable\s+wages\s+YTD[^:]*:\s*" + self._STUB_MONEY,
+        ])
+        if data["ytd_taxable"] is None and data.get("ytd_gross") is not None:
+            data["ytd_taxable"] = round(
+                data["ytd_gross"] - (data.get("ytd_retirement") or 0.0), 2
+            )
+
+        # ── Pay period ──
+        period = re.search(r"Period\s+(\d+)\s+of\s+(\d+)", raw, re.IGNORECASE)
+        if period:
+            data["pay_period_number"] = int(period.group(1))
+            data["pay_periods_per_year"] = int(period.group(2))
+
+        for key, label in (
+            ("pay_period_start", r"PAY\s+PERIOD\s+START"),
+            ("pay_period_end", r"PAY\s+PERIOD\s+END"),
+            ("pay_date", r"PAY\s+DATE"),
+        ):
+            m = re.search(
+                rf"{label}\s*\n\s*([A-Za-z]+\s+\d+,?\s+\d{{4}})",
+                raw, re.IGNORECASE,
+            )
+            if m:
+                data[key] = m.group(1).strip()
+
+        freq = line_after(r"PAY\s+FREQUENCY")
+        if freq:
+            data["pay_frequency"] = freq
+
+        # ── Identity ──
+        name = line_after(r"EMPLOYEE\s+NAME")
+        if name:
+            data["employee_name"] = name
+
+        emp_id = line_after(r"EMPLOYEE\s+ID")
+        if emp_id:
+            data["employee_id"] = emp_id
+
+        # The employer is the banner line immediately above "EIN:". Taking the
+        # first uppercase block instead would return the diagonal
+        # "SYNTHETIC — NOT VALID" watermark, which extracts ahead of the header.
+        employer = self._line_before(raw, r"^EIN:")
+        if employer:
+            data["employer_name"] = employer
+
+        ssn = re.search(r"\*{2,3}-\*{2}-(\d{4})", raw)
+        if ssn:
+            data["ssn_last4"] = ssn.group(1)
+
+        dd = re.search(r"account\s+ending\s+\*{2,4}(\d{4})", raw, re.IGNORECASE)
+        if dd:
+            data["direct_deposit_last4"] = dd.group(1)
+
+        return {k: v for k, v in data.items() if v is not None}
+
+    # Fields beyond the three required ones. Each present field lifts
+    # confidence, so a stub that parses fully scores 1.0 and a partial parse
+    # is visibly worse rather than silently equal.
+    _STUB_OPTIONAL_FIELDS = (
+        "employee_name", "employer_name", "employee_id", "ssn_last4",
+        "pay_period_start", "pay_period_end", "pay_date",
+        "pay_period_number", "pay_frequency",
+        "federal_tax_withheld", "state_tax_withheld", "ss_tax_withheld",
+        "medicare_tax_withheld", "total_deductions", "ytd_federal_tax",
+        "ytd_net_pay", "ytd_taxable", "direct_deposit_last4",
+    )
+
+    def _score_pay_stub(self, data: Dict[str, Any]) -> tuple:
+        """Confidence for a pay stub: 0.85 for the three required fields,
+        +0.05 per optional field, capped at 1.0."""
+        errors: List[str] = []
+        required = ("gross_pay", "net_pay", "ytd_gross")
+        missing = [f for f in required if data.get(f) is None]
+        if missing:
+            errors.append(
+                "Could not extract required pay stub fields: "
+                + ", ".join(missing)
+            )
+            # Proportional to what was found, so a stub missing one field is
+            # not scored the same as one that parsed nothing.
+            found = len(required) - len(missing)
+            return round(0.85 * found / len(required), 3), errors
+
+        confidence = 0.85
+        for field in self._STUB_OPTIONAL_FIELDS:
+            if data.get(field) is not None:
+                confidence += 0.05
+        return round(min(confidence, 1.0), 3), errors
+
+    def _line_before(self, text: str, marker_pattern: str) -> Optional[str]:
+        """The non-blank line immediately preceding a marker line."""
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        for i, line in enumerate(lines):
+            if re.search(marker_pattern, line, re.IGNORECASE) and i > 0:
+                return lines[i - 1]
+        return None
+
     def _parse_application(self, text: str) -> Dict[str, Any]:
         data = {}
         text = text.replace(",", "").replace("$", "")

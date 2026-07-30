@@ -12,10 +12,24 @@ thresholds:
 income_verification:
   # Tolerance for stated income vs. documented income variance
   variance_tolerance_percent: 0.10
+  # Tolerance for a pay stub's annualized YTD taxable wages vs W-2 box 1.
+  # Compared against TAXABLE YTD (gross less pre-tax deferrals), not gross:
+  # a 401k deferral is exempt from income tax but not from FICA, so YTD gross
+  # legitimately exceeds box 1 by the deferral rate, and comparing it
+  # directly would flag an honest file.
+  paystub_variance_tolerance_percent: 0.15
+  # Plausible net-to-gross range on a pay stub. Outside this band the
+  # deductions do not fit the stated gross — a common tell on a fabricated
+  # stub.
+  paystub_net_gross_min: 0.50
+  paystub_net_gross_max: 0.95
+  # Edit distance allowed between the employer named on the pay stub and the
+  # employer on the W-2, after case and punctuation normalisation.
+  employer_name_max_edit_distance: 5
   # Minimum documentation required
   required_docs: ["application", "w2"]
   # Optional but strengthens file
-  supplementary_docs: ["bank_statement", "tax_return"]
+  supplementary_docs: ["bank_statement", "tax_return", "pay_stub"]
 
 debt_calculation:
   # Items to include in monthly debt

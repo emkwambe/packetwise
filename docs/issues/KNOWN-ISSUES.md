@@ -337,7 +337,8 @@ in
 
 - **Severity:** Medium
 - **Found:** realitydb-docs Sprint 6
-- **Fix sprint:** unassigned
+- **Status:** **Fixed in Sprint 7A**
+- **Fix sprint:** 7A
 
 > Sprint number is in the `realitydb-docs` sequence, not PacketWise's.
 
@@ -391,3 +392,135 @@ See `../../../realitydb-docs/docs/sprints/SPRINT-006-paystub.md`.
 
 Also correct the `else`-branch message to distinguish "unclassified" from
 "classified, no parser".
+
+**Resolution (Sprint 7A)**
+
+Pay stub extractor added. `_parse_pay_stub()` + `_score_pay_stub()` in
+`src/idp/extractor.py`, `PayStubData` in `src/idp/schemas.py`, and the
+`PAY_STUB` classifier signature widened to 4 required + 12 strong keywords.
+
+**27 fields extracted:** `employee_name`, `employer_name`, `employee_id`,
+`ssn_last4`, `pay_period_start`, `pay_period_end`, `pay_date`,
+`pay_period_number`, `pay_periods_per_year`, `pay_frequency`, `gross_pay`,
+`federal_tax_withheld`, `state_tax_withheld`, `ss_tax_withheld`,
+`medicare_tax_withheld`, `retirement_deduction`, `total_deductions`, `net_pay`,
+`ytd_gross`, `ytd_federal_tax`, `ytd_state_tax`, `ytd_ss_tax`,
+`ytd_medicare_tax`, `ytd_retirement`, `ytd_net_pay`, `ytd_taxable`,
+`direct_deposit_last4`.
+
+**Cross-validation** in `UnderwritingEngine.cross_validate_pay_stub()`, with
+thresholds in `config/rules.yaml`:
+
+- `PAY_STUB_INCOME_MISMATCH` — annualized YTD **taxable** wages vs W-2 box 1,
+  15% tolerance. Taxable, not gross: a 401k deferral is exempt from income tax
+  but not FICA, so YTD gross legitimately exceeds box 1 by the deferral rate.
+  Measured across five seeds, comparing gross would have shown 0–6.4% variance
+  on honest files; comparing taxable shows 0.0%.
+- `UNUSUAL_DEDUCTION_RATE` — net-to-gross outside 50–95%.
+- `EMPLOYER_MISMATCH_STUB_VS_W2` — Levenshtein distance > 5 after casefolding
+  and dropping corporate suffixes. Normalisation is essential: a stub prints the
+  employer upper-cased and a W-2 in title case.
+
+Verified: pay stub extraction confidence 0.500 → **1.000**, packet
+`extraction_confidence` 0.80 → **1.00**, 9-packet run 3/3/3 with 0 errors and
+every DTI unchanged. Each of the three checks was also driven against a
+deliberately inconsistent stub and confirmed to fire, and to stay quiet on
+benign case/suffix variation.
+
+**Uncovered a pre-existing bug while fixing this.** Checking the stub's employer
+against the W-2's required the W-2's employer, which was wrong and always had
+been: the W-2 identity block is two columns, so `Employer name[,:]?\s*([^\n]+)`
+captured the remainder of the *label*. Every W-2 ever processed stored
+`employer_name = 'and address'` and `employee_name = 'and address'`. Confidence
+never moved because neither field is scored. Fixed via
+`_parse_w2_identity_block()`. Rows written before Sprint 7A still carry the bad
+value.
+
+**Not closed by this fix.** None of the above is covered by a committed test —
+see ISSUE-011.
+
+---
+
+## ISSUE-010: Bank deposits are gross, pay stub is net
+
+- **Severity:** Medium
+- **Found:** realitydb-docs Sprint 6
+- **Status:** Deferred to Sprint 8B
+- **Fix sprint:** 8B
+
+**Description**
+
+The generated bank statement deposits `monthly_gross_income ± 3%`. The pay stub
+reports net pay, which is 65–69% of gross on generated files.
+
+Real payroll deposits are **net**. A lender reconciling the stub's net pay
+against the statement's payroll deposit would therefore find a discrepancy on
+every packet — the two documents disagree by the entire deduction total.
+
+This is the last remaining cross-document inconsistency in the generated packet
+now that ISSUE-009 is closed.
+
+**Why it is deferred rather than fixed**
+
+PacketWise derives verified income from statement deposits. Changing
+`BankStatementRenderer` to deposit net pay would change the income figure the
+engine reads, and therefore every DTI and every decision in the suite. The
+generator change and the engine change have to land together, with the scenario
+thresholds re-tuned against the new income basis.
+
+Doing it inside Sprint 7A would have conflated a contained extractor addition
+with a change that moves every number in the test suite.
+
+**Workaround**
+
+Do not reconcile stub net pay against statement deposits. Income verification
+currently runs off W-2 box 1 and, since Sprint 7A, the stub's YTD taxable wages
+— neither of which touches the deposit figure.
+
+**Fix plan**
+
+Sprint 8B — coordinated change:
+
+1. `BankStatementRenderer` deposits net pay, taken from the same profile the
+   stub reads, so deposit == stub net exactly.
+2. The engine learns that a payroll deposit is net and grosses it up (or reads
+   gross from the stub / W-2 instead) before computing DTI.
+3. Re-tune the approved/flagged/rejected scenario targets against the new
+   income basis and confirm 3/3/3 still holds.
+
+---
+
+## ISSUE-011: No committed tests for IDP extraction
+
+- **Severity:** Medium
+- **Found:** Sprint 7A
+- **Fix sprint:** unassigned
+
+**Description**
+
+Extraction correctness is verified by ad-hoc scripts at the end of each sprint,
+not by anything that runs on its own. `tests/integration/test_pipeline.py`
+exercises the pipeline end to end but asserts on decisions, not on extracted
+field values.
+
+The W-2 employer bug closed under ISSUE-009 is the argument for this issue
+existing. `employer_name` was the literal string `'and address'` for every W-2
+the system ever processed. It survived indefinitely because no test asserted on
+the field and confidence does not score it — the packet still reported 1.00.
+
+realitydb-docs solved the equivalent problem in its Sprint 6 by committing 400
+checks across 25 seeds that assert against text extracted from rendered PDFs.
+PacketWise has no counterpart.
+
+**Fix plan**
+
+Add field-level extraction tests per document type, asserting extracted values
+against known generator values across several seeds:
+
+- W-2: employer, employee, box 1/2/3/4/5/6
+- pay stub: all 27 fields, plus the confidence floor
+- bank statement: balances, recurring debits, housing split
+- 1003: borrower, loan, property, DTI, LTV, credit score
+
+Plus rule-level tests for the three Sprint 7A checks, including the negative
+cases that were run manually.

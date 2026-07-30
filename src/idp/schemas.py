@@ -65,6 +65,46 @@ class BankStatementData(BaseModel):
     monthly_housing_from_statement: Optional[float] = None
     recurring_debits: List[dict] = []  # [{"name": "AUTO LOAN PMT", "amount": 450.00}]
 
+class PayStubData(BaseModel):
+    # ── Identity ──
+    employee_name: Optional[str] = None
+    employer_name: Optional[str] = None
+    employee_id: Optional[str] = None
+    ssn_last4: Optional[str] = None
+    # ── Pay period ──
+    pay_period_start: Optional[str] = None
+    pay_period_end: Optional[str] = None
+    pay_date: Optional[str] = None
+    pay_period_number: Optional[int] = None
+    pay_periods_per_year: Optional[int] = None   # "Period 22 of 26" -> 26
+    pay_frequency: Optional[str] = None
+    # ── Current period ──
+    gross_pay: Optional[float] = None
+    federal_tax_withheld: Optional[float] = None
+    state_tax_withheld: Optional[float] = None
+    ss_tax_withheld: Optional[float] = None
+    medicare_tax_withheld: Optional[float] = None
+    retirement_deduction: Optional[float] = None
+    total_deductions: Optional[float] = None
+    net_pay: Optional[float] = None
+    # ── Year to date ──
+    ytd_gross: Optional[float] = None
+    ytd_federal_tax: Optional[float] = None
+    ytd_net_pay: Optional[float] = None
+    # These four are not in the original field list but are what make a
+    # cross-check against the W-2 exact rather than approximate: a pre-tax
+    # deferral is exempt from income tax and not from FICA, so YTD gross
+    # cannot be compared to W-2 box 1 directly. ytd_taxable is gross less
+    # deferrals and is the figure that ties to box 1.
+    ytd_state_tax: Optional[float] = None
+    ytd_ss_tax: Optional[float] = None
+    ytd_medicare_tax: Optional[float] = None
+    ytd_retirement: Optional[float] = None
+    ytd_taxable: Optional[float] = None
+    # ── Payment ──
+    direct_deposit_last4: Optional[str] = None
+
+
 class TaxReturnData(BaseModel):
     taxpayer_name: Optional[str] = None
     ssn: Optional[str] = None
