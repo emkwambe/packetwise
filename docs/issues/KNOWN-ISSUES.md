@@ -330,3 +330,64 @@ The deprecated independent generators (`_build_statement_data`, `_build_data`)
 are unreachable from any public entry point but still importable. Full detail
 in
 `../../../realitydb-docs/docs/sprints/SPRINT-005-borrower-profile.md`.
+
+---
+
+## ISSUE-009: Pay stubs classify but cannot be parsed
+
+- **Severity:** Medium
+- **Found:** realitydb-docs Sprint 6
+- **Fix sprint:** unassigned
+
+> Sprint number is in the `realitydb-docs` sequence, not PacketWise's.
+
+**Description**
+
+Packets now carry two pay stubs (periods 22 and 21). `DocType.PAY_STUB` exists
+in `src/idp/schemas.py` and `classifier.py` has a full signature for it — a
+generated stub classifies as `pay_stub` at confidence **1.000**.
+
+But `OCRExtractor.extract_fields()` in `src/idp/extractor.py` branches on doc
+type across `W2`, `APPLICATION`, `BANK_STATEMENT` and `TAX_RETURN` only. A
+correctly-classified pay stub falls through to the `else`:
+
+```python
+else:
+    errors.append("Could not classify document type")
+    confidence *= 0.5
+```
+
+Two consequences:
+
+1. **Packet `extraction_confidence` fell from 1.00 to 0.80** —
+   `(1 + 1 + 1 + 0.5 + 0.5) / 5`. The BENCHMARKS note "Text PDFs:
+   `extraction_confidence` = 1.0" no longer holds for any packet with a stub.
+2. **The error message is wrong.** The document *was* classified; what is
+   missing is a parser. Anyone reading the extraction errors is told the
+   opposite of what happened.
+
+Underwriting is unaffected — every DTI and LTV in the 9-packet run is identical
+to the 3-document run to one decimal place. The stub is simply inert.
+
+**Why it matters beyond the metric**
+
+The pay stub is the only document in the packet that could verify income
+*independently of the W-2*. Right now income verification rests on a single
+source, and the document added to corroborate it is the one document the
+pipeline does not read.
+
+**Workaround**
+
+Judge runs on the decision split and the violation list, not on
+`extraction_confidence`, until a parser exists.
+
+**Fix plan**
+
+Add `_parse_pay_stub()` extracting gross pay, net pay, the YTD columns, pay
+period dates and employer, then a rule comparing stub YTD gross against W-2
+box 1. The generator guarantees the relationship: at period 26,
+`gross YTD − 401k YTD == W-2 box 1` to within $0.01, verified across 25 seeds.
+See `../../../realitydb-docs/docs/sprints/SPRINT-006-paystub.md`.
+
+Also correct the `else`-branch message to distinguish "unclassified" from
+"classified, no parser".

@@ -34,6 +34,7 @@ try:
   from realitydb_docs.w2 import W2Renderer
   from realitydb_docs.bank_statement import BankStatementRenderer
   from realitydb_docs.loan_app import LoanAppRenderer
+  from realitydb_docs.paystub import PayStubRenderer
 except ImportError as e:
   print(f"ERROR: Cannot import realitydb-docs: {e}")
   print("Ensure realitydb-docs is at:")
@@ -155,6 +156,14 @@ def run(count: int = 10, text_application: bool = False,
         f"{tmpdir}/bank_{i:03d}.pdf"
       )
 
+      # Two most recent bi-weekly stubs. Period 22 is the current one;
+      # period 21 is the prior period, which is what a lender asks for to
+      # confirm the income is not a one-off.
+      r21 = PayStubRenderer(profile, pay_period=21)
+      r22 = PayStubRenderer(profile, pay_period=22)
+      stub21 = r21.render(f"{tmpdir}/stub21_{i:03d}.pdf")
+      stub22 = r22.render(f"{tmpdir}/stub22_{i:03d}.pdf")
+
       if text_application:
         loan_path = f"{tmpdir}/loan_{i:03d}.txt"
         Path(loan_path).write_text(
@@ -173,10 +182,15 @@ def run(count: int = 10, text_application: bool = False,
         "w2": w2_path,
         "bank": bank_path,
         "loan": loan_path,
+        "stub22": stub22,
+        "stub21": stub21,
         "app_mime": app_mime,
       })
 
-    print(f"  ✓ {len(packets)} packets, {len(packets) * 3} documents")
+    docs_per_packet = 5
+    print(f"  ✓ {len(packets)} packets, "
+          f"{len(packets) * docs_per_packet} documents "
+          f"({docs_per_packet} per packet)")
     print(f"  Borrower of packet 1: {packets[0]['profile'].full_name} "
           f"({packets[0]['profile'].employer_name})")
 
@@ -190,16 +204,20 @@ def run(count: int = 10, text_application: bool = False,
       try:
         # Send all three documents as one packet.
         with contextlib.ExitStack() as stack:
-          w2f = stack.enter_context(open(pkt["w2"], "rb"))
-          bankf = stack.enter_context(open(pkt["bank"], "rb"))
-          appf = stack.enter_context(open(pkt["loan"], "rb"))
+          def _open(key):
+            return stack.enter_context(open(pkt[key], "rb"))
+
           files = [
             ("files", (Path(pkt["w2"]).name,
-              w2f, "application/pdf")),
+              _open("w2"), "application/pdf")),
             ("files", (Path(pkt["bank"]).name,
-              bankf, "application/pdf")),
+              _open("bank"), "application/pdf")),
             ("files", (Path(pkt["loan"]).name,
-              appf, pkt["app_mime"])),
+              _open("loan"), pkt["app_mime"])),
+            ("files", (Path(pkt["stub22"]).name,
+              _open("stub22"), "application/pdf")),
+            ("files", (Path(pkt["stub21"]).name,
+              _open("stub21"), "application/pdf")),
           ]
           r = requests.post(
             f"{PACKETWISE_URL}/process",

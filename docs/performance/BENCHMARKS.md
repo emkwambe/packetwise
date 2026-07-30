@@ -72,6 +72,34 @@ occasionally crossing the 50% critical ceiling.
 - S-015 is the first run where **all three documents are generated PDFs**. The
   text application stub became a two-page Form 1003 PDF, so the pipeline now
   parses three PDFs per packet instead of two PDFs plus a text file.
+
+## realitydb-docs Sprint 6 notes (5-document packets)
+
+> Sprint number is in the `realitydb-docs` sequence, not PacketWise's.
+
+Packets grew from **three to five** documents: W-2 + bank statement + Form 1003
++ pay stub period 22 + pay stub period 21. This changes what the per-packet
+figures describe, so it is recorded here rather than left to be inferred.
+
+| | 3-document packet | 5-document packet |
+|--|-------------------|-------------------|
+| Documents per 9-packet run | 27 | 45 |
+| Avg processing time | 0.505s | 0.522s |
+| Per-packet range | 0.23–0.83s | 0.27–0.75s |
+| Accuracy | 3/3/3 | 3/3/3 |
+
+**+3.4% wall-clock for +67% documents.** Per-document cost fell; the fixed
+per-packet database work (document rows, loan row, exception rows, two commits)
+dominates the total, which is consistent with the S-013 observation that
+per-document cost is not what drives the average.
+
+**`extraction_confidence` regressed from 1.00 to 0.80** and the note above —
+"Text PDFs: `extraction_confidence` = 1.0" — no longer holds for packets
+containing a pay stub. This is not an OCR or document-quality effect: the stub
+classifies as `pay_stub` at confidence 1.000, then `extractor.py` halves it
+because there is no `_parse_pay_stub` branch. `(1 + 1 + 1 + 0.5 + 0.5) / 5 =
+0.80`. See ISSUE-009. Accuracy is unaffected — every DTI and LTV is identical to
+the 3-document run to one decimal place.
 - 0.472s vs S-014's 0.450s on the same backend: within noise on a 9-packet
   sample, so replacing the stub with a real PDF cost little or nothing
   measurable. It is **not** comparable to the S-014 SQLite row (0.057s) — that
