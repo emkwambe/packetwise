@@ -194,6 +194,14 @@ Verified over 30 packets: flagged DTI landed at **44.5–46.6%** on all ten —
 inside the 43–50% band with margin on both sides — and the run produced a clean
 **10/10/10** with zero errors.
 
+**Superseded (realitydb-docs Sprint 5)**
+
+The `debt_to_income_target` mechanism still works but is no longer how packets
+are built. Liabilities are now sized on `BorrowerProfile` from a single
+`dti_target`, and realised DTI equals that target exactly on every seed rather
+than approximately. The first Sprint 5 integration run re-opened this failure
+mode from the other direction — see ISSUE-008.
+
 ---
 
 ## ISSUE-007: Session auth is shared-password with no revocation
@@ -256,3 +264,69 @@ protection lives in the extractor rather than the engine.
 Sprint 14 — move the reconciliation into `UnderwritingEngine`: take housing from
 whichever source is authoritative, and treat the other as corroboration rather
 than an additional debt.
+
+---
+
+## ISSUE-008: Packet documents describe three different borrowers
+
+- **Severity:** Critical
+- **Found:** review of the generated packs
+- **Status:** **Fixed in realitydb-docs Sprint 5**
+- **Fix sprint:** realitydb-docs 5
+
+> Sprint number is in the `realitydb-docs` sequence, not PacketWise's.
+
+**Description**
+
+`w2.py`, `bank_statement.py` and `loan_app.py` each drew identity, employer and
+income from their own private name pools. Every generator was deterministic on
+its own seed, so the suite looked reproducible, but nothing tied the three
+documents in a packet to one person:
+
+```
+Loan application: Robert Miller
+Bank statement:   Susan Johnson
+W-2:              James Jones
+```
+
+This made the packs unusable for their stated purpose. PacketWise exists to
+test whether identity, employment, income, assets and liabilities reconcile
+*across* sources; a packet naming three people cannot exercise that at all.
+
+It also silently weakened every earlier result in this tracker. ISSUE-002 and
+ISSUE-005 were closed by threading `target_annual_income` and
+`debt_to_income_target` through the generators one parameter at a time — which
+aligned the *numbers* across documents while the *people* stayed unrelated.
+
+**Resolution (realitydb-docs Sprint 5)**
+
+Introduced `realitydb_docs/profile.py`: a `BorrowerProfile` dataclass plus a
+`FinancialCaseGenerator`. Every document is now a view of one profile — no
+renderer generates identity, employer or income independently. Eight
+independent RNG streams keep fields from correlating with each other.
+
+`integrate_realitydb.py` builds one profile per packet and renders all three
+documents from it.
+
+Verified:
+
+- Seeds 1–25, 11 assertions each (275 checks) — name, employer, SSN and address
+  consistent across W-2, bank statement and 1003. All pass.
+- Statement recurring debits carry the profile's exact liability amounts;
+  ending balance equals the checking assets declared on the 1003.
+- 9-packet integration run: **3 approved / 3 flagged / 3 rejected / 0 errors**.
+  Stable at 18 packets / seed 500 → 6 / 6 / 6 / 0.
+
+Two profile defects were found *by* that run and fixed before closing:
+`dti_target` was overshot by 1.5–3.5% because the credit-card and other-debt
+lines were added outside the budget (this pushed two `flagged` packets over the
+50% ceiling — the ISSUE-005 failure mode again), and a 10% 401k deferral sat
+exactly on the 10% `INCOME_VARIANCE` tolerance, so form rounding decided
+whether the rule fired. Deferral now caps at 8%.
+
+**Not closed by this fix**
+
+The deprecated independent generators (`_build_statement_data`, `_build_data`)
+are unreachable from any public entry point but still importable. Full detail
+in
+`../../../realitydb-docs/docs/sprints/SPRINT-005-borrower-profile.md`.

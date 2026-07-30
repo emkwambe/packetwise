@@ -1,14 +1,23 @@
 """
 RealityDB → PacketWise Integration
-Generates synthetic W-2s and bank statements
-via realitydb-docs and processes them through
-PacketWise as complete loan packets.
+Generates complete synthetic loan packets via
+realitydb-docs and processes them through
+PacketWise.
+
+Since Sprint 5 every packet is built from one
+BorrowerProfile, so the W-2, the bank statement
+and the Form 1003 in a packet describe the SAME
+borrower with the same employer and the same
+income. Before Sprint 5 the three generators drew
+identity independently and a single packet could
+name three different people.
 
 Usage:
   python integrate_realitydb.py
   python integrate_realitydb.py --count 20
 """
 import argparse
+import contextlib
 import os
 import sys
 import tempfile
@@ -21,13 +30,10 @@ sys.path.insert(0, str(
 ))
 
 try:
-  from realitydb_docs.w2 import generate_synthetic_w2_batch
-  from realitydb_docs.bank_statement import (
-    generate_synthetic_bank_statement_batch
-  )
-  from realitydb_docs.loan_app import (
-    generate_loan_application_batch
-  )
+  from realitydb_docs.profile import FinancialCaseGenerator
+  from realitydb_docs.w2 import W2Renderer
+  from realitydb_docs.bank_statement import BankStatementRenderer
+  from realitydb_docs.loan_app import LoanAppRenderer
 except ImportError as e:
   print(f"ERROR: Cannot import realitydb-docs: {e}")
   print("Ensure realitydb-docs is at:")
@@ -37,72 +43,62 @@ except ImportError as e:
 PACKETWISE_URL = "http://localhost:8000/api/v1"
 API_KEY = "pw_live_packetwise_2026"
 
+# One entry per expected decision. dti_target sizes the profile's
+# liabilities; the engine recomputes DTI from the 1003's housing payment plus
+# the statement's non-housing recurring debits, so the target is what drives
+# the outcome rather than a figure printed on the form.
+#
+# credit_score is not part of the plan's scenario table but is retained: the
+# engine reads it off the application and a score under 620 is a violation in
+# its own right, so dropping it would silently change every outcome.
 SCENARIOS = [
   {
     "name": "approved",
-    "ssn": "900-12-3456",
+    "annual_income": 102000,
     "loan_amount": 320000,
     "property_value": 420000,
-    "gross_monthly_income": 8500,
+    "dti_target": 0.36,
     "credit_score": 740,
-    "monthly_housing_payment": 1900,
-    # Loan-bearing debts as a share of monthly income. Fixing this makes
-    # each packet's DTI predictable instead of seed-dependent (ISSUE-005):
-    # DTI = (housing + share * income) / income.
-    #   approved: (1900 + 0.05*8500)/8500 = 27.4%  -> clean
-    "debt_to_income_target": 0.05,
-    # DTI printed on the 1003. Separate key because the two generators mean
-    # different things by the name: the bank statement's target is the share
-    # of income going to loan payments, the 1003's is the whole ratio. The
-    # engine recomputes DTI from housing + statement debits either way, so
-    # this figure is what the document states, not what decides the file.
-    "loan_app_dti_target": 0.36,
   },
   {
     "name": "flagged",
-    "ssn": "900-23-4567",
+    "annual_income": 74400,
     "loan_amount": 380000,
     "property_value": 460000,
-    "gross_monthly_income": 6200,
+    "dti_target": 0.45,
     "credit_score": 685,
-    "monthly_housing_payment": 2400,
-    #   flagged: (2400 + 0.07*6200)/6200 = 45.7% -> over 43% QM, under the
-    #   50% critical ceiling, so it stays flagged across the W-2 +/-3% band
-    "debt_to_income_target": 0.07,
-    "loan_app_dti_target": 0.45,
   },
   {
     "name": "rejected",
-    "ssn": "900-34-5678",
+    "annual_income": 57600,
     "loan_amount": 450000,
     "property_value": 500000,
-    "gross_monthly_income": 4800,
+    "dti_target": 0.55,
     "credit_score": 590,
-    "monthly_housing_payment": 3100,
-    #   rejected: credit score 590 is critical on its own
-    "debt_to_income_target": 0.10,
-    "loan_app_dti_target": 0.55,
   },
 ]
 
-def make_application_text(scenario: dict, index: int) -> str:
-  """Plain-text 1003 stub.
 
-  Superseded by the generated Form 1003 PDF (see generate_loan_application_batch
-  below) and kept only for --text-application, which is useful when isolating
-  a PDF-extraction problem from an underwriting one.
+def make_application_text(profile, scenario: dict) -> str:
+  """Plain-text 1003 stub, rendered from the same profile as the PDFs.
+
+  Superseded by the generated Form 1003 PDF and kept only for
+  --text-application, which is useful when isolating a PDF-extraction
+  problem from an underwriting one.
   """
   return f"""Uniform Residential Loan Application
-Borrower Name: Test Borrower {index:03d}
-SSN: {scenario["ssn"]}
-Loan Amount: {scenario["loan_amount"]}
-Property Value: {scenario["property_value"]}
-Gross Monthly Income: {scenario["gross_monthly_income"]}
-Credit Score: {scenario["credit_score"]}
-Monthly Housing Payment: {scenario["monthly_housing_payment"]}
+Borrower Name: {profile.full_name}
+SSN: {profile.ssn}
+Loan Amount: {profile.loan_amount:.0f}
+Property Value: {profile.property_value:.0f}
+Gross Monthly Income: {profile.monthly_gross_income:.2f}
+Credit Score: {profile.credit_score}
+Monthly Housing Payment: {profile.monthly_rent_mortgage:.2f}
 """
 
-def run(count: int = 10, text_application: bool = False):
+
+def run(count: int = 10, text_application: bool = False,
+        seed_start: int = 42):
   print("=" * 60)
   print("REALITYDB → PACKETWISE INTEGRATION")
   print(f"Processing {count} loan packets")
@@ -122,127 +118,93 @@ def run(count: int = 10, text_application: bool = False):
     print("Start with: uvicorn main:app --port 8000")
     sys.exit(1)
 
+  gen = FinancialCaseGenerator()
+
+  results = {
+    "approved": 0,
+    "flagged": 0,
+    "rejected": 0,
+    "errors": 0
+  }
+
   with tempfile.TemporaryDirectory() as tmpdir:
-    # ── Generate supporting documents per scenario ──
-    # Scenarios cycle across packets, so documents are generated one group
-    # per scenario rather than as a single batch: every W-2 and bank
-    # statement is built against its own scenario's income, which is what
-    # keeps INCOME_VARIANCE from firing (ISSUE-002).
-    print(f"\n[1/3] Generating W-2s per scenario...")
-    w2_groups = {}
-    bank_groups = {}
-    try:
-      for s_idx, scenario in enumerate(SCENARIOS):
-        n = len([i for i in range(count)
-                 if i % len(SCENARIOS) == s_idx])
-        if n == 0:
-          continue
-        annual_income = scenario["gross_monthly_income"] * 12
-        print(f"  {scenario['name']}: {n} W-2(s) "
-              f"at ${annual_income:,.0f}")
-        w2_groups[s_idx] = generate_synthetic_w2_batch(
-          count=n,
-          output_dir=os.path.join(tmpdir, f"w2_{scenario['name']}"),
-          seed=42 + s_idx,
-          tax_year=2024,
-          target_annual_income=annual_income,
-        )
-    except Exception as e:
-      print(f"  ERROR generating W-2s: {e}")
-      sys.exit(1)
+    print(f"\n[1/2] Building {count} borrower profiles and their documents...")
 
-    print(f"\n[2/3] Generating bank statements per scenario...")
-    try:
-      for s_idx, scenario in enumerate(SCENARIOS):
-        if s_idx not in w2_groups:
-          continue
-        n = len(w2_groups[s_idx])
-        annual_income = scenario["gross_monthly_income"] * 12
-        bank_groups[s_idx] = generate_synthetic_bank_statement_batch(
-          count=n,
-          output_dir=os.path.join(tmpdir, f"bank_{scenario['name']}"),
-          seed_start=100 + s_idx * 50,
-          annual_incomes=[annual_income],
-          debt_to_income_target=scenario["debt_to_income_target"],
-        )
-    except Exception as e:
-      print(f"  ERROR generating bank statements: {e}")
-      sys.exit(1)
-
-    print(f"\n[3/4] Generating Form 1003 loan applications per scenario...")
-    loan_groups = {}
-    if not text_application:
-      try:
-        for s_idx, scenario in enumerate(SCENARIOS):
-          if s_idx not in w2_groups:
-            continue
-          n = len(w2_groups[s_idx])
-          annual_income = scenario["gross_monthly_income"] * 12
-          # credit_score and monthly_housing_payment are passed explicitly:
-          # the underwriting engine reads both off the application, and DTI is
-          # (housing + statement debits) / income — so a 1003 without them
-          # would silently change every scenario's outcome.
-          loan_groups[s_idx] = generate_loan_application_batch(
-            count=n,
-            output_dir=os.path.join(tmpdir, f"loan_{scenario['name']}"),
-            seed_start=200 + s_idx * 50,
-            annual_incomes=[annual_income],
-            loan_amounts=[scenario["loan_amount"]],
-            property_values=[scenario["property_value"]],
-            debt_to_income_targets=[scenario["loan_app_dti_target"]],
-            credit_scores=[scenario["credit_score"]],
-            monthly_housing_payments=[scenario["monthly_housing_payment"]],
-          )
-      except Exception as e:
-        print(f"  ERROR generating loan applications: {e}")
-        sys.exit(1)
-
-    total_docs = sum(len(v) for v in w2_groups.values())
-    print(f"  ✓ Generated {total_docs} W-2s, "
-          f"{sum(len(v) for v in bank_groups.values())} bank statements and "
-          f"{sum(len(v) for v in loan_groups.values())} loan applications")
-
-    # Process packets
-    print(f"\n[4/4] Sending to PacketWise...")
-    results = {
-      "approved": 0,
-      "flagged": 0,
-      "rejected": 0,
-      "errors": 0
-    }
-
+    packets = []
     for i in range(count):
-      s_idx = i % len(SCENARIOS)
-      k = i // len(SCENARIOS)
-      scenario = SCENARIOS[s_idx]
-      w2_path = w2_groups[s_idx][k]
-      bank_path = bank_groups[s_idx][k]
+      scenario = SCENARIOS[i % len(SCENARIOS)]
+
+      # ── One profile per packet: the single source of truth ──
+      profile = gen.generate(
+        seed=seed_start + i,
+        annual_income=scenario["annual_income"],
+        loan_amount=scenario["loan_amount"],
+        property_value=scenario["property_value"],
+        dti_target=scenario["dti_target"],
+        scenario=scenario["name"],
+        credit_score=scenario["credit_score"],
+      )
+
+      # ── All three documents rendered from that one profile ──
+      w2_path = W2Renderer(profile).render(
+        f"{tmpdir}/w2_{i:03d}.pdf"
+      )
+      bank_path = BankStatementRenderer(
+        profile, month=10
+      ).render(
+        f"{tmpdir}/bank_{i:03d}.pdf"
+      )
 
       if text_application:
-        app_path = Path(tmpdir) / f"app_{i:03d}.txt"
-        app_path.write_text(
-          make_application_text(scenario, i + 1)
+        loan_path = f"{tmpdir}/loan_{i:03d}.txt"
+        Path(loan_path).write_text(
+          make_application_text(profile, scenario)
         )
         app_mime = "text/plain"
       else:
-        app_path = Path(loan_groups[s_idx][k])
+        loan_path = LoanAppRenderer(profile).render(
+          f"{tmpdir}/loan_{i:03d}.pdf"
+        )
         app_mime = "application/pdf"
 
+      packets.append({
+        "profile": profile,
+        "scenario": scenario,
+        "w2": w2_path,
+        "bank": bank_path,
+        "loan": loan_path,
+        "app_mime": app_mime,
+      })
+
+    print(f"  ✓ {len(packets)} packets, {len(packets) * 3} documents")
+    print(f"  Borrower of packet 1: {packets[0]['profile'].full_name} "
+          f"({packets[0]['profile'].employer_name})")
+
+    # Process packets
+    print(f"\n[2/2] Sending to PacketWise...")
+
+    for i, pkt in enumerate(packets):
+      profile = pkt["profile"]
+      scenario = pkt["scenario"]
+
       try:
-        with open(w2_path, "rb") as w2f, \
-             open(bank_path, "rb") as bankf, \
-             open(app_path, "rb") as appf:
+        # Send all three documents as one packet.
+        with contextlib.ExitStack() as stack:
+          w2f = stack.enter_context(open(pkt["w2"], "rb"))
+          bankf = stack.enter_context(open(pkt["bank"], "rb"))
+          appf = stack.enter_context(open(pkt["loan"], "rb"))
+          files = [
+            ("files", (Path(pkt["w2"]).name,
+              w2f, "application/pdf")),
+            ("files", (Path(pkt["bank"]).name,
+              bankf, "application/pdf")),
+            ("files", (Path(pkt["loan"]).name,
+              appf, pkt["app_mime"])),
+          ]
           r = requests.post(
             f"{PACKETWISE_URL}/process",
             headers={"X-API-Key": API_KEY},
-            files=[
-              ("files", (Path(w2_path).name,
-                w2f, "application/pdf")),
-              ("files", (Path(bank_path).name,
-                bankf, "application/pdf")),
-              ("files", (app_path.name,
-                appf, app_mime)),
-            ],
+            files=files,
             timeout=60,
           )
 
@@ -267,7 +229,8 @@ def run(count: int = 10, text_application: bool = False):
             f"got={status:9s} | {time_s:.3f}s "
             f"| conf={conf:.2f} "
             f"| DTI={dti if dti is None else f'{dti*100:.1f}%'} "
-            f"| LTV={ltv if ltv is None else f'{ltv*100:.1f}%'}"
+            f"| LTV={ltv if ltv is None else f'{ltv*100:.1f}%'} "
+            f"| {profile.full_name}"
           )
           # Show what actually fired when the decision misses, so a
           # failing run explains itself without a second pass.
@@ -326,6 +289,9 @@ def run(count: int = 10, text_application: bool = False):
   except Exception as e:
     print(f"  Could not fetch report: {e}")
 
+  return results
+
+
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument(
@@ -333,9 +299,14 @@ if __name__ == "__main__":
     help="Number of loan packets to process"
   )
   parser.add_argument(
+    "--seed", type=int, default=42,
+    help="Base seed; packet i uses seed+i"
+  )
+  parser.add_argument(
     "--text-application", action="store_true",
     help="Send the plain-text 1003 stub instead of the generated PDF "
          "(isolates PDF extraction from underwriting when debugging)"
   )
   args = parser.parse_args()
-  run(count=args.count, text_application=args.text_application)
+  run(count=args.count, text_application=args.text_application,
+      seed_start=args.seed)
