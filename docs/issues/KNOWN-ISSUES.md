@@ -524,3 +524,149 @@ against known generator values across several seeds:
 
 Plus rule-level tests for the three Sprint 7A checks, including the negative
 cases that were run manually.
+
+---
+
+## ISSUE-012: Timeline cases never tested against PacketWise
+
+- **Severity:** High
+- **Found:** realitydb-docs Sprint 9
+- **Status:** **Fixed in Sprint 10**
+- **Fix sprint:** 10
+
+> Sprint number is in the `realitydb-docs` sequence for the generator side and
+> PacketWise's for the engine side; the work landed in both repos together.
+
+**Description**
+
+realitydb-docs Sprint 9 added timeline cases — 18-month borrower journeys whose
+documents are snapshots of an evolving financial world, including an
+`income_inflation` fraud preset where the 1003 is rendered from a *claimed*
+state and the W-2, pay stubs and bank statements from the *world* state.
+
+Nothing had ever sent one through PacketWise. The generator asserted the fraud
+was detectable by comparing its own PDFs; whether the engine that exists to do
+exactly that comparison actually caught it was unverified. Both products'
+credibility rested on a claim neither had tested.
+
+**Resolution (Sprint 10)**
+
+`integrate_timeline.py` generates timeline cases via realitydb-docs, sends all
+six documents of each to `POST /api/v1/process`, and scores the response
+against the case's own `evaluation/expected_decision.json`.
+
+Two metrics, deliberately kept apart:
+
+1. **Decision accuracy** — PacketWise's decision vs the ground truth produced by
+   realitydb-docs' `derive_decision()`. These are different functions:
+   `derive_decision` grades DTI and LTV bands, PacketWise grades violation
+   severity. They are not required to agree.
+2. **Fraud detection** — did `INCOME_VARIANCE` fire where an overstatement
+   exists, and stay quiet where none does. This is the metric that matters.
+
+**Verified over a 9-case run (3 career_growth / 3 financial_stress / 3 fraud):**
+
+| Metric | Result |
+|--------|--------|
+| Decision accuracy | **9/9 (100%)** |
+| `INCOME_VARIANCE` on fraud cases | **3/3 (100%)** |
+| False positives on clean cases | **0/6** |
+| Errors | 0 |
+| Avg processing time | 0.571s (~105 cases/min) |
+
+Income as the engine read it on the three fraud cases:
+
+```
+tc-01222: 1003 states $37,164/yr vs W-2 box 1 $27,727 = 25.4% variance
+tc-01259: 1003 states $36,864/yr vs W-2 box 1 $26,659 = 27.7% variance
+tc-01296: 1003 states $37,428/yr vs W-2 box 1 $26,489 = 29.2% variance
+```
+
+Against a 10% tolerance, all three fire. Clean cases show a variance equal to
+the 401(k) deferral rate — capped at 8% since realitydb-docs Sprint 5 — so none
+of the six crossed the threshold. That cap is what keeps this test meaningful;
+see ISSUE-002 for the era when `INCOME_VARIANCE` fired on everything.
+
+**Noted while closing: the predicted divergence did not occur, for a reason
+worth recording.** Decision accuracy was expected to be lower than 100% because
+an overstatement is a *warning* to the engine (→ `flagged`) while the borrower's
+real DTI is past the ceiling (→ `rejected`). All three fraud cases matched
+anyway, because the `income_inflation_fraud` preset stacks a layoff before the
+inflation, so the world DTI reaches 110% and `DTI_EXCEEDS_MAX` — a *critical* —
+fires alongside `INCOME_VARIANCE`. The critical decides the label.
+
+The consequence is that this fixture cannot demonstrate `INCOME_VARIANCE`
+deciding an outcome on its own. A preset with a clean DTI and an inflated income
+would isolate it. Tracked as ISSUE-014.
+
+---
+
+## ISSUE-013: Only the first bank statement is read
+
+- **Severity:** Medium
+- **Found:** Sprint 10
+- **Fix sprint:** 11
+
+**Description**
+
+A timeline case ships two bank statements (October and November).
+`UnderwritingEngine.evaluate()` selects documents with
+
+```python
+bank_data = next((d.get("fields", {}) for d in documents
+                  if d.get("type") == "bank_statement"), {})
+```
+
+`next(...)` takes the first match and discards the rest. November is uploaded,
+classified, extracted, charged against `extraction_confidence` — and then never
+consulted. Every DTI in the system is computed from a single month's recurring
+debits.
+
+This is harmless in the current fixtures because both statements are rendered
+from the same profile and carry identical recurring debts, which is why the
+Sprint 10 integration run is unaffected. It stops being harmless as soon as the
+two months legitimately differ, which is precisely what timeline cases are for:
+a `CAR_PURCHASE` at month 17 would appear in November and not October, and the
+engine would read the month that does not show it.
+
+The same `next(...)` pattern applies to `application`, `w2` and `tax_return`. For
+those a packet carries one document, so the behaviour is correct today but rests
+on an assumption nothing enforces.
+
+**Workaround**
+
+Send one bank statement, or accept that only the alphabetically-first-uploaded
+month is scored.
+
+**Fix plan**
+
+Sprint 11 — collect *all* statements of a type, then reconcile: take recurring
+debts from the most recent statement, or union them across months and
+de-duplicate by description. Decide explicitly which month is authoritative
+rather than inheriting whichever arrived first.
+
+---
+
+## ISSUE-014: Fraud preset cannot isolate INCOME_VARIANCE
+
+- **Severity:** Low
+- **Found:** Sprint 10
+- **Fix sprint:** unassigned
+
+**Description**
+
+`income_inflation_fraud_timeline` applies a 50% layoff at month 12 before
+inflating income 30% at month 17. The resulting world DTI is ~110%, so
+`DTI_EXCEEDS_MAX` (critical) fires on every case and determines the decision.
+`INCOME_VARIANCE` fires too, but never changes an outcome.
+
+That makes the fixture unable to answer the question a buyer would ask: *does
+the engine catch an overstatement on a borrower who would otherwise qualify?*
+The detection is proven; its decision impact is not.
+
+**Fix plan**
+
+Add a preset with a healthy DTI and an inflated income — no layoff — so
+`INCOME_VARIANCE` is the only violation and moves the decision from `approved`
+to `flagged` on its own. This also gives the evaluation layer a case where the
+cross-document check is the sole finding.
